@@ -1,0 +1,37 @@
+[package]
+name = "recortei"
+version = "2.0.0"
+edition = "2021"
+description = "Captura de área de tela com anotações, estilo ShareX (Linux e Windows)"
+license = "MIT"
+
+[dependencies]
+winit = { version = "0.30", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen"] }
+softbuffer = { version = "0.4", default-features = false, features = ["x11", "x11-dlopen", "wayland", "wayland-dlopen"] }
+tiny-skia = "0.12"
+ab_glyph = "0.2"
+arboard = { version = "3", default-features = false, features = ["image-data", "wayland-data-control"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "6"
+png = "0.18"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+[target.'cfg(windows)'.dependencies]
+tray-icon = "0.26"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Threading", "Win32_System_Pipes", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_Security", "Win32_System_LibraryLoader", "Win32_System_Console", "Win32_System_RemoteDesktop"] }
+notify-rust = "4"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni = { version = "0.3", default-features = false, features = ["blocking", "async-io"] }
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+# Desenho é pesado em pixels; otimiza dependências mesmo no modo debug.
+[profile.dev.package."*"]
+opt-level = 3
