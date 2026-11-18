@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=Recortei
+GenericName=Captura de tela
+Comment=Captura de área de tela com anotações
+Exec=recortei
+Icon=io.github.recortei
+Terminal=false
+Categories=Utility;
+Keywords=screenshot;captura;print;recorte;anotação;
+StartupNotify=false
+Actions=capture;
+
+[Desktop Action capture]
+Name=Capturar agora
+Exec=recortei --capture

@@ -1,0 +1,92 @@
+# Pacotes .deb e .rpm do Recortei, gerados com o nFPM (https://nfpm.goreleaser.com).
+# Rode a partir da raiz do repositório, depois do `cargo build --release`:
+#
+#   RECORTEI_VERSION=0.1.0 nfpm package -f packaging/linux/nfpm.yaml -p deb -t recortei-linux-amd64.deb
+#   RECORTEI_VERSION=0.1.0 nfpm package -f packaging/linux/nfpm.yaml -p rpm -t recortei-linux-x86_64.rpm
+#
+# O binário só liga com a libc e a libgcc; as bibliotecas gráficas (xkbcommon,
+# Wayland, X11) são carregadas com dlopen, por isso aparecem aqui como dependências
+# explícitas. No .rpm usamos os sonames para valer no Fedora e no openSUSE.
+name: recortei
+arch: amd64
+platform: linux
+version: ${RECORTEI_VERSION}
+version_schema: semver
+release: 1
+section: graphics
+priority: optional
+maintainer: Fábio Henrique Araújo <contato@fabioharaujo.com.br>
+vendor: Recortei
+homepage: https://github.com/FabioHAraujo/Recortei
+license: GPL-3.0-or-later
+description: |-
+  Captura de área de tela com anotações, leve e nativa.
+  Fica na bandeja do sistema; a tecla Insert seleciona uma área da tela, que
+  pode ser anotada (caneta, setas, retângulos, texto, marca-texto, pixelizar,
+  numeração) e depois copiada, salva em PNG ou enviada por link.
+
+contents:
+  - src: target/release/recortei
+    dst: /usr/bin/recortei
+    file_info:
+      mode: 0755
+  - src: packaging/linux/io.github.recortei.desktop
+    dst: /usr/share/applications/io.github.recortei.desktop
+    file_info:
+      mode: 0644
+  - src: packaging/icons/recortei.svg
+    dst: /usr/share/icons/hicolor/scalable/apps/io.github.recortei.svg
+    file_info:
+      mode: 0644
+  - src: packaging/icons/recortei-256.png
+    dst: /usr/share/icons/hicolor/256x256/apps/io.github.recortei.png
+    file_info:
+      mode: 0644
+  - src: LICENSE
+    dst: /usr/share/licenses/recortei/LICENSE
+    file_info:
+      mode: 0644
+  - src: README.md
+    dst: /usr/share/doc/recortei/README.md
+    file_info:
+      mode: 0644
+
+overrides:
+  deb:
+    depends:
+      - libc6 (>= 2.35)
+      - libgcc-s1
+      - libxkbcommon0
+      - libwayland-client0
+    recommends:
+      - libx11-6
+      - libx11-xcb1
+      - libxcursor1
+      - libxi6
+      - libxkbcommon-x11-0
+      - libglib2.0-bin
+      - xdg-utils
+    suggests:
+      - wl-clipboard
+      - xclip
+  rpm:
+    depends:
+      - libc.so.6()(64bit)
+      - libgcc_s.so.1()(64bit)
+      - libxkbcommon.so.0()(64bit)
+      - libwayland-client.so.0()(64bit)
+    recommends:
+      - libX11.so.6()(64bit)
+      - libX11-xcb.so.1()(64bit)
+      - libXcursor.so.1()(64bit)
+      - libXi.so.6()(64bit)
+      - libxkbcommon-x11.so.0()(64bit)
+      - /usr/bin/gsettings
+      - xdg-utils
+    suggests:
+      - wl-clipboard
+      - xclip
+
+rpm:
+  group: Applications/Multimedia
+  summary: Captura de área de tela com anotações

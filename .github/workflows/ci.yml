@@ -2,28 +2,60 @@ name: CI
 
 on:
   push:
+    branches: ['**']
+    tags-ignore: ['v*'] # tags de versão ficam com o release.yml
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  build:
+  check:
+    name: ${{ matrix.name }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            bin: target/release/recortei
-            name: recortei-linux-x86_64
-          - os: windows-latest
-            bin: target/release/recortei.exe
-            name: recortei-windows-x86_64.exe
+          - name: Linux
+            os: ubuntu-latest
+          - name: Windows
+            os: windows-latest
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo test --locked
-      - run: cargo build --release --locked
-      - uses: actions/upload-artifact@v4
+      - uses: actions/checkout@v7
         with:
-          name: ${{ matrix.name }}
-          path: ${{ matrix.bin }}
+          persist-credentials: false
+
+      # Versão fixa: lints novos do clippy no stable não deixam o CI vermelho
+      # de surpresa (o `-D warnings` abaixo). Atualize de vez em quando.
+      - uses: dtolnay/rust-toolchain@1.100.0
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Formatação (cargo fmt)
+        run: cargo fmt --all -- --check
+
+      - name: Lint (cargo clippy)
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Testes
+        run: cargo test --locked
+
+      - name: Build de release
+        run: cargo build --release --locked
+
+      - name: Versão do binário
+        shell: bash
+        run: |
+          bin=target/release/recortei
+          [ "$RUNNER_OS" = Windows ] && bin=target/release/recortei.exe
+          "$bin" --version

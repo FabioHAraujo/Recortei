@@ -1,0 +1,58 @@
+# Maintainer: Fábio Henrique Araújo <contato@fabioharaujo.com.br>
+#
+# Pacote do Recortei para o Arch Linux, pronto para o AUR: compila com o cargo a
+# partir do tarball de código-fonte da tag no GitHub. O release.yml usa este mesmo
+# arquivo, colocando ao lado dele um `git archive` da tag com o nome esperado em
+# `source`, e o makepkg não baixa nada.
+#
+# Ao publicar no AUR, troque o 'SKIP' pelo hash real do tarball (`updpkgsums`).
+
+pkgname=recortei
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Captura de área de tela com anotações, leve e nativa'
+arch=('x86_64')
+url='https://github.com/FabioHAraujo/Recortei'
+license=('GPL-3.0-or-later')
+# xkbcommon e Wayland/X11 são carregados com dlopen pelo winit.
+depends=('gcc-libs' 'glibc' 'libxkbcommon' 'wayland')
+makedepends=('cargo')
+optdepends=('libx11: sessões X11'
+            'libxcursor: cursores em sessões X11'
+            'libxi: entrada em sessões X11'
+            'libxkbcommon-x11: teclado em sessões X11'
+            'glib2: registrar a tecla Insert no GNOME (recortei --setup)'
+            'xdg-utils: abrir a pasta dos recortes'
+            'wl-clipboard: área de transferência alternativa no Wayland'
+            'xclip: área de transferência alternativa no X11')
+options=('!lto' '!debug')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+_srcdir="Recortei-$pkgver"
+
+prepare() {
+  cd "$_srcdir"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$_srcdir"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release
+}
+
+package() {
+  cd "$_srcdir"
+  install -Dm755 target/release/recortei "$pkgdir/usr/bin/recortei"
+  install -Dm644 packaging/linux/io.github.recortei.desktop \
+    "$pkgdir/usr/share/applications/io.github.recortei.desktop"
+  install -Dm644 packaging/icons/recortei.svg \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.recortei.svg"
+  install -Dm644 packaging/icons/recortei-256.png \
+    "$pkgdir/usr/share/icons/hicolor/256x256/apps/io.github.recortei.png"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}
