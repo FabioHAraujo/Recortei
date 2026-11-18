@@ -1,0 +1,53 @@
+---
+import "@codeatlasdev/ui/styles/global.css";
+import { faqPage, graph, serializeJsonLd, softwareApplication } from "@codeatlasdev/ui/seo";
+import { messages, repo, version } from "../lib/landing.ts";
+
+// O servidor renderiza em pt-BR; a ilha troca idioma, título e descrição no cliente.
+const m = messages["pt-BR"];
+// URL pública vem de `site` no astro.config (variável SITE_URL). Sem ela, a página sai sem canonical
+// e og:url, em vez de gravar um endereço local no HTML de produção.
+const canonical = Astro.site ? new URL(Astro.url.pathname, Astro.site).href : undefined;
+const jsonLd = serializeJsonLd(
+	graph(
+		softwareApplication({
+			name: m.brand,
+			description: m.metaDescription,
+			...(canonical ? { url: canonical } : {}),
+			applicationCategory: "UtilitiesApplication",
+			operatingSystem: "Windows, Linux",
+			offer: { price: "0", priceCurrency: "BRL" },
+			extra: { license: "https://www.gnu.org/licenses/gpl-3.0.html", codeRepository: repo, softwareVersion: version },
+		}),
+		faqPage([...m.faq]),
+	),
+);
+---
+<!doctype html>
+<html lang="pt-BR">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+		<title>{m.metaTitle}</title>
+		<meta name="description" content={m.metaDescription} />
+		{canonical && <link rel="canonical" href={canonical} />}
+		<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+		<meta property="og:type" content="website" />
+		<meta property="og:site_name" content={m.brand} />
+		<meta property="og:title" content={m.metaTitle} />
+		<meta property="og:description" content={m.metaDescription} />
+		{canonical && <meta property="og:url" content={canonical} />}
+		<meta property="og:locale" content="pt_BR" />
+		<meta property="og:locale:alternate" content="en_US" />
+		<meta name="twitter:card" content="summary" />
+		<script type="application/ld+json" set:html={jsonLd} />
+	</head>
+	<body>
+		<slot />
+		<script>
+			// One store instance for the page: theme switches and OS scheme changes stay in sync.
+			import { colorScheme } from "@codeatlasdev/ui";
+			colorScheme.init();
+		</script>
+	</body>
+</html>
