@@ -24,7 +24,8 @@ pub fn save_png(pm: &Pixmap) -> Result<PathBuf, String> {
     std::fs::create_dir_all(&dir).map_err(|e| format!("Erro criando {}: {e}", dir.display()))?;
     let stamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
     let path = unique_path(&dir, &stamp);
-    pm.save_png(&path).map_err(|e| format!("Erro salvando {}: {e}", path.display()))?;
+    pm.save_png(&path)
+        .map_err(|e| format!("Erro salvando {}: {e}", path.display()))?;
     Ok(path)
 }
 
@@ -61,20 +62,58 @@ impl Clipboard {
             }
         }
     }
+
+    /// Copia texto (o link do envio para a nuvem).
+    pub fn set_text(&mut self, text: &str) -> Result<(), String> {
+        let first = (|| -> Result<(), arboard::Error> {
+            if self.inner.is_none() {
+                self.inner = Some(arboard::Clipboard::new()?);
+            }
+            self.inner.as_mut().expect("criado acima").set_text(text)
+        })();
+        match first {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                self.inner = None;
+                #[cfg(target_os = "linux")]
+                if linux_pipe(
+                    text.as_bytes(),
+                    &[("wl-copy", &[]), ("xclip", &["-selection", "clipboard"])],
+                )
+                .is_ok()
+                {
+                    return Ok(());
+                }
+                Err(e.to_string())
+            }
+        }
+    }
 }
 
 /// Se o arboard falhar, tenta `wl-copy` (Wayland) ou `xclip` (X11).
 #[cfg(target_os = "linux")]
 fn linux_fallback(pm: &Pixmap) -> Result<(), String> {
+    let png = pm.encode_png().map_err(|e| e.to_string())?;
+    linux_pipe(
+        &png,
+        &[
+            ("wl-copy", &["--type", "image/png"]),
+            ("xclip", &["-selection", "clipboard", "-t", "image/png"]),
+        ],
+    )
+}
+
+/// Entrega `data` ao primeiro utilitário de clipboard que existir.
+#[cfg(target_os = "linux")]
+fn linux_pipe(data: &[u8], cmds: &[(&str, &[&str])]) -> Result<(), String> {
     use std::io::Write;
     use std::process::{Command, Stdio};
-    let png = pm.encode_png().map_err(|e| e.to_string())?;
-    let cmds: [(&str, &[&str]); 2] =
-        [("wl-copy", &["--type", "image/png"]), ("xclip", &["-selection", "clipboard", "-t", "image/png"])];
-    for (cmd, args) in cmds {
-        let Ok(mut child) = Command::new(cmd).args(args).stdin(Stdio::piped()).spawn() else { continue };
+    for &(cmd, args) in cmds {
+        let Ok(mut child) = Command::new(cmd).args(args).stdin(Stdio::piped()).spawn() else {
+            continue;
+        };
         if let Some(mut stdin) = child.stdin.take() {
-            if stdin.write_all(&png).is_ok() {
+            if stdin.write_all(data).is_ok() {
                 drop(stdin);
                 // wl-copy/xclip ficam em segundo plano servindo os dados
                 std::thread::spawn(move || child.wait());
@@ -119,7 +158,16 @@ fn show_notification(title: &str, body: &str) -> Result<(), String> {
         "/org/freedesktop/Notifications",
         Some("org.freedesktop.Notifications"),
         "Notify",
-        &("Recortei", 0u32, "applets-screenshooter", title, body, Vec::<&str>::new(), hints, 5000i32),
+        &(
+            "Recortei",
+            0u32,
+            "applets-screenshooter",
+            title,
+            body,
+            Vec::<&str>::new(),
+            hints,
+            5000i32,
+        ),
     )
     .map(|_| ())
     .map_err(|e| e.to_string())

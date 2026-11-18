@@ -1,5 +1,5 @@
 //! Preferências (ferramenta, cor e espessura) em `<config>/recortei/config.json`
-//! e pasta onde os recortes são salvos.
+//! (mais o servidor de envio) e pasta onde os recortes são salvos.
 
 use std::path::PathBuf;
 
@@ -10,6 +10,11 @@ pub fn config_file() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
         .join("recortei")
         .join("config.json")
+}
+
+/// `<config>/recortei/uploads.jsonl`: um JSON por envio, com o link para apagar.
+pub fn uploads_file() -> PathBuf {
+    config_file().with_file_name("uploads.jsonl")
 }
 
 /// `~/Imagens/Recortei` (ou o equivalente do sistema).
@@ -65,6 +70,45 @@ impl Config {
 
     pub fn width(&self) -> Option<i64> {
         self.map.get("width").and_then(Value::as_i64)
+    }
+
+    /// Origem do servidor de envio (padrão `https://vkdl.link`); permite usar
+    /// um servidor próprio compatível.
+    pub fn upload_url(&self) -> String {
+        self.str_value("upload_url")
+            .unwrap_or_else(|| crate::upload::DEFAULT_URL.into())
+    }
+
+    /// Chave de API opcional (vai como `Authorization: Bearer`): dá prazo de
+    /// retenção garantido aos envios.
+    pub fn upload_api_key(&self) -> Option<String> {
+        self.str_value("upload_api_key")
+    }
+
+    fn str_value(&self, key: &str) -> Option<String> {
+        self.map
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(Into::into)
+    }
+
+    /// No Linux, `recortei --setup` já rodou (sozinho na primeira abertura ou
+    /// pelo usuário).
+    #[cfg(target_os = "linux")]
+    pub fn linux_setup_done(&self) -> bool {
+        self.map
+            .get("linux_setup_done")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn set_linux_setup_done(&mut self) {
+        self.map
+            .insert("linux_setup_done".into(), Value::from(true));
+        self.save();
     }
 
     pub fn remember(&mut self, tool: &str, color: usize, width: i32) {

@@ -48,21 +48,74 @@ pub struct ToolInfo {
 }
 
 pub const TOOLS: [ToolInfo; 10] = [
-    ToolInfo { tool: Tool::Move, id: "move", tip: "Mover / ajustar área", key: 'v' },
-    ToolInfo { tool: Tool::Pen, id: "pen", tip: "Caneta", key: 'p' },
-    ToolInfo { tool: Tool::Line, id: "line", tip: "Linha", key: 'l' },
-    ToolInfo { tool: Tool::Arrow, id: "arrow", tip: "Seta", key: 'a' },
-    ToolInfo { tool: Tool::Rect, id: "rect", tip: "Retângulo", key: 'r' },
-    ToolInfo { tool: Tool::Ellipse, id: "ellipse", tip: "Elipse", key: 'e' },
-    ToolInfo { tool: Tool::Text, id: "text", tip: "Texto", key: 't' },
-    ToolInfo { tool: Tool::Marker, id: "marker", tip: "Marca-texto", key: 'h' },
-    ToolInfo { tool: Tool::Pixelate, id: "pixelate", tip: "Pixelizar / censurar", key: 'b' },
-    ToolInfo { tool: Tool::Step, id: "step", tip: "Numeração", key: 'n' },
+    ToolInfo {
+        tool: Tool::Move,
+        id: "move",
+        tip: "Mover / ajustar área",
+        key: 'v',
+    },
+    ToolInfo {
+        tool: Tool::Pen,
+        id: "pen",
+        tip: "Caneta",
+        key: 'p',
+    },
+    ToolInfo {
+        tool: Tool::Line,
+        id: "line",
+        tip: "Linha",
+        key: 'l',
+    },
+    ToolInfo {
+        tool: Tool::Arrow,
+        id: "arrow",
+        tip: "Seta",
+        key: 'a',
+    },
+    ToolInfo {
+        tool: Tool::Rect,
+        id: "rect",
+        tip: "Retângulo",
+        key: 'r',
+    },
+    ToolInfo {
+        tool: Tool::Ellipse,
+        id: "ellipse",
+        tip: "Elipse",
+        key: 'e',
+    },
+    ToolInfo {
+        tool: Tool::Text,
+        id: "text",
+        tip: "Texto",
+        key: 't',
+    },
+    ToolInfo {
+        tool: Tool::Marker,
+        id: "marker",
+        tip: "Marca-texto",
+        key: 'h',
+    },
+    ToolInfo {
+        tool: Tool::Pixelate,
+        id: "pixelate",
+        tip: "Pixelizar / censurar",
+        key: 'b',
+    },
+    ToolInfo {
+        tool: Tool::Step,
+        id: "step",
+        tip: "Numeração",
+        key: 'n',
+    },
 ];
 
 impl Tool {
     pub fn info(self) -> &'static ToolInfo {
-        TOOLS.iter().find(|t| t.tool == self).expect("toda ferramenta está em TOOLS")
+        TOOLS
+            .iter()
+            .find(|t| t.tool == self)
+            .expect("toda ferramenta está em TOOLS")
     }
     pub fn id(self) -> &'static str {
         self.info().id
@@ -124,7 +177,12 @@ impl R {
 }
 
 fn norm_rect(p0: (f32, f32), p1: (f32, f32)) -> R {
-    R::new(p0.0.min(p1.0), p0.1.min(p1.1), (p1.0 - p0.0).abs(), (p1.1 - p0.1).abs())
+    R::new(
+        p0.0.min(p1.0),
+        p0.1.min(p1.1),
+        (p1.0 - p0.0).abs(),
+        (p1.1 - p0.1).abs(),
+    )
 }
 
 /// Geometria de um monitor/janela de sobreposição.
@@ -164,7 +222,11 @@ impl Selection {
 
     pub fn hit(&self, x: f32, y: f32, handle: f32) -> Option<Mode> {
         let r = self.rect?;
-        if !(r.x - handle <= x && x <= r.right() + handle && r.y - handle <= y && y <= r.bottom() + handle) {
+        if !(r.x - handle <= x
+            && x <= r.right() + handle
+            && r.y - handle <= y
+            && y <= r.bottom() + handle)
+        {
             return None;
         }
         let mut edge = 0;
@@ -281,6 +343,7 @@ pub enum Item {
     Width,
     Undo,
     Redo,
+    Upload,
     Ok,
     Close,
     Bar,
@@ -297,7 +360,14 @@ fn toolbar_slots() -> Vec<Slot> {
     v.extend((0..COLORS.len()).map(|i| Slot::It(Item::Color(i))));
     v.push(Slot::It(Item::Width));
     v.push(Slot::Sep);
-    v.extend([Slot::It(Item::Undo), Slot::It(Item::Redo), Slot::Sep, Slot::It(Item::Ok), Slot::It(Item::Close)]);
+    v.extend([
+        Slot::It(Item::Undo),
+        Slot::It(Item::Redo),
+        Slot::Sep,
+        Slot::It(Item::Upload),
+        Slot::It(Item::Ok),
+        Slot::It(Item::Close),
+    ]);
     v
 }
 
@@ -323,6 +393,8 @@ pub struct KeyInput {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Exit {
     Confirm,
+    /// Confirma e envia para a nuvem (vkdl.link).
+    Upload,
     Cancel,
 }
 
@@ -356,7 +428,10 @@ pub struct Overlay {
 impl Overlay {
     pub fn new(base: Pixmap, mons: Vec<Mon>, cfg: &Config) -> Self {
         let tool = cfg.tool().and_then(Tool::from_id).unwrap_or(Tool::Rect);
-        let color = cfg.color().filter(|c| (0..COLORS.len() as i64).contains(c)).unwrap_or(0) as usize;
+        let color = cfg
+            .color()
+            .filter(|c| (0..COLORS.len() as i64).contains(c))
+            .unwrap_or(0) as usize;
         let width = cfg.width().filter(|w| (1..=40).contains(w)).unwrap_or(4) as i32;
         Overlay {
             base,
@@ -402,7 +477,11 @@ impl Overlay {
     }
 
     fn monitor_of(&self, x: f32, y: f32) -> usize {
-        if let Some(i) = self.mons.iter().position(|m| m.img.contains_half_open(x, y)) {
+        if let Some(i) = self
+            .mons
+            .iter()
+            .position(|m| m.img.contains_half_open(x, y))
+        {
             return i;
         }
         let d = |m: &Mon| (m.img.cx() - x).abs() + (m.img.cy() - y).abs();
@@ -427,7 +506,11 @@ impl Overlay {
     fn new_ann(&mut self, tool: Tool, x: f32, y: f32) -> Ann {
         let id = self.next_id;
         self.next_id += 1;
-        let pts = if matches!(tool, Tool::Pen | Tool::Text | Tool::Step) { vec![(x, y)] } else { vec![(x, y), (x, y)] };
+        let pts = if matches!(tool, Tool::Pen | Tool::Text | Tool::Step) {
+            vec![(x, y)]
+        } else {
+            vec![(x, y), (x, y)]
+        };
         Ann {
             id,
             tool,
@@ -497,11 +580,20 @@ impl Overlay {
 
     // -- resultado
     pub fn confirm(&mut self) {
+        self.finish_with(Exit::Confirm);
+    }
+
+    /// Como `confirm`, mas o recorte vai para a nuvem e o link para o clipboard.
+    pub fn upload(&mut self) {
+        self.finish_with(Exit::Upload);
+    }
+
+    fn finish_with(&mut self, exit: Exit) {
         if self.editing.is_some() {
             self.commit_text();
         }
         if self.output_rect().is_some() {
-            self.exit = Some(Exit::Confirm);
+            self.exit = Some(exit);
         }
     }
 
@@ -531,7 +623,16 @@ impl Overlay {
     // -- desenho da cena
     fn paint_scene(&self, r: IntRect, caret: bool) -> Pixmap {
         let mut pm = Pixmap::new(r.width(), r.height()).expect("área não vazia");
-        copy_region(&self.base, r.x(), r.y(), &mut pm, 0, 0, r.width(), r.height());
+        copy_region(
+            &self.base,
+            r.x(),
+            r.y(),
+            &mut pm,
+            0,
+            0,
+            r.width(),
+            r.height(),
+        );
         for a in &self.anns {
             self.draw_ann(&mut pm, r, a, false);
         }
@@ -581,7 +682,12 @@ impl Overlay {
             }
             Tool::Rect => {
                 let r = norm_rect(pts[0], pts[1]);
-                let l = Line { width: lw, cap: LineCap::Round, join: LineJoin::Miter, dash: None };
+                let l = Line {
+                    width: lw,
+                    cap: LineCap::Round,
+                    join: LineJoin::Miter,
+                    dash: None,
+                };
                 draw::stroke(pm, draw::rect_path(r.x, r.y, r.w, r.h), c, 1.0, &l, ts);
             }
             Tool::Ellipse => {
@@ -603,7 +709,17 @@ impl Overlay {
                 let (x, y) = pts[0];
                 let lines: Vec<&str> = a.text.split('\n').collect();
                 for (i, l) in lines.iter().enumerate() {
-                    draw::text(pm, Weight::Bold, fs, l, x, y + m.ascent + i as f32 * m.height, c, 1.0, ts);
+                    draw::text(
+                        pm,
+                        Weight::Bold,
+                        fs,
+                        l,
+                        x,
+                        y + m.ascent + i as f32 * m.height,
+                        c,
+                        1.0,
+                        ts,
+                    );
                 }
                 if caret {
                     let last = lines.last().copied().unwrap_or("");
@@ -618,7 +734,12 @@ impl Overlay {
                         .fold(0.0, f32::max);
                     let mut dash = Line::butt(1.0 * u);
                     dash.dash = Some(vec![4.0 * u, 3.0 * u]);
-                    let r = draw::rect_path(x - 4.0 * u, y - 3.0 * u, widest + 12.0 * u, m.height * lines.len() as f32 + 6.0 * u);
+                    let r = draw::rect_path(
+                        x - 4.0 * u,
+                        y - 3.0 * u,
+                        widest + 12.0 * u,
+                        m.height * lines.len() as f32 + 6.0 * u,
+                    );
                     draw::stroke(pm, r, [1.0, 1.0, 1.0], 0.7, &dash, ts);
                 }
             }
@@ -628,7 +749,11 @@ impl Overlay {
                 let mut p = Pb::new();
                 p.circle(x, y, rad);
                 draw::fill(pm, p.finish(), c, 1.0, ts);
-                let fg = if luminance(c) > 0.6 { [0.0, 0.0, 0.0] } else { [1.0, 1.0, 1.0] };
+                let fg = if luminance(c) > 0.6 {
+                    [0.0, 0.0, 0.0]
+                } else {
+                    [1.0, 1.0, 1.0]
+                };
                 draw::text_centered(pm, Weight::Bold, rad * 1.1, &a.n.to_string(), x, y, fg, ts);
             }
             Tool::Move => {}
@@ -670,9 +795,15 @@ impl Overlay {
                         n += 1;
                     }
                 }
-                if n > 0 {
-                    *cell = [(sum[0] / n) as u8, (sum[1] / n) as u8, (sum[2] / n) as u8, 255];
+                if n == 0 {
+                    continue; // célula fora da imagem: fica preta
                 }
+                *cell = [
+                    (sum[0] / n) as u8,
+                    (sum[1] / n) as u8,
+                    (sum[2] / n) as u8,
+                    255,
+                ];
             }
             *cache = Some(PixCache { key, cols, cells });
         }
@@ -712,9 +843,16 @@ impl Overlay {
         let g = self.mons.get(mon)?.img;
         let u = self.mons[mon].ui;
         let slots = toolbar_slots();
-        let tw = (PAD * 2.0 + slots.iter().map(|s| if matches!(s, Slot::Sep) { SEP } else { BTN }).sum::<f32>()) * u;
+        let tw = (PAD * 2.0
+            + slots
+                .iter()
+                .map(|s| if matches!(s, Slot::Sep) { SEP } else { BTN })
+                .sum::<f32>())
+            * u;
         let th = (BTN + PAD * 2.0) * u;
-        let x = (r.cx() - tw / 2.0).max(g.x + 8.0 * u).min(g.right() - tw - 8.0 * u);
+        let x = (r.cx() - tw / 2.0)
+            .max(g.x + 8.0 * u)
+            .min(g.right() - tw - 8.0 * u);
         let y = if r.bottom() + 10.0 * u + th <= g.bottom() - 4.0 * u {
             r.bottom() + 10.0 * u
         } else if r.y - 10.0 * u - th >= g.y + 4.0 * u {
@@ -737,7 +875,13 @@ impl Overlay {
                 }
             }
         }
-        Some(Toolbar { rect: R::new(x, y, tw, th), u, mon, items, seps })
+        Some(Toolbar {
+            rect: R::new(x, y, tw, th),
+            u,
+            mon,
+            items,
+            seps,
+        })
     }
 
     fn toolbar_hit(&self, x: f32, y: f32) -> Option<Item> {
@@ -745,7 +889,12 @@ impl Overlay {
         if !tb.rect.contains(x, y) {
             return None;
         }
-        Some(tb.items.iter().find(|(_, r)| r.contains_half_open(x, y)).map_or(Item::Bar, |(it, _)| *it))
+        Some(
+            tb.items
+                .iter()
+                .find(|(_, r)| r.contains_half_open(x, y))
+                .map_or(Item::Bar, |(it, _)| *it),
+        )
     }
 
     fn tooltip(&self, it: Item) -> String {
@@ -755,6 +904,7 @@ impl Overlay {
             Item::Width => format!("Espessura: {}  (roda do mouse ou + / −)", self.width),
             Item::Undo => "Desfazer (Ctrl+Z)".into(),
             Item::Redo => "Refazer (Ctrl+Y)".into(),
+            Item::Upload => "Enviar para vkdl.link e copiar o link (Ctrl+U)".into(),
             Item::Ok => "Copiar e salvar (Enter / Ctrl+C / duplo clique)".into(),
             Item::Close => "Cancelar (Esc)".into(),
             Item::Bar => String::new(),
@@ -764,15 +914,36 @@ impl Overlay {
     fn draw_toolbar(&self, pm: &mut Pixmap, ts: Transform) {
         let Some(tb) = self.toolbar() else { return };
         let u = tb.u;
-        let R { x: tx, y: ty, w: tw, h: th } = tb.rect;
-        draw::fill(pm, draw::rounded_rect(tx, ty, tw, th, 8.0 * u), [0.12, 0.12, 0.14], 0.96, ts);
+        let R {
+            x: tx,
+            y: ty,
+            w: tw,
+            h: th,
+        } = tb.rect;
+        draw::fill(
+            pm,
+            draw::rounded_rect(tx, ty, tw, th, 8.0 * u),
+            [0.12, 0.12, 0.14],
+            0.96,
+            ts,
+        );
         let color = COLORS[self.color];
         for &(it, b) in &tb.items {
             let (cx, cy) = (b.cx(), b.cy());
             let active = it == Item::Tool(self.tool);
             if active || self.hover == Some(it) {
-                let (c, a) = if active { ([0.20, 0.55, 1.0], 0.9) } else { ([1.0, 1.0, 1.0], 0.12) };
-                draw::fill(pm, draw::rounded_rect(b.x + u, b.y + u, b.w - 2.0 * u, b.h - 2.0 * u, 6.0 * u), c, a, ts);
+                let (c, a) = if active {
+                    ([0.20, 0.55, 1.0], 0.9)
+                } else {
+                    ([1.0, 1.0, 1.0], 0.12)
+                };
+                draw::fill(
+                    pm,
+                    draw::rounded_rect(b.x + u, b.y + u, b.w - 2.0 * u, b.h - 2.0 * u, 6.0 * u),
+                    c,
+                    a,
+                    ts,
+                );
             }
             match it {
                 Item::Tool(t) => draw::icon(pm, t.id(), cx, cy, u, color, ts),
@@ -790,14 +961,29 @@ impl Overlay {
                 }
                 Item::Width => {
                     let mut p = Pb::new();
-                    p.circle(cx, cy - 3.0 * u, (self.width.min(18) as f32 / 2.0).max(1.5) * u);
+                    p.circle(
+                        cx,
+                        cy - 3.0 * u,
+                        (self.width.min(18) as f32 / 2.0).max(1.5) * u,
+                    );
                     draw::fill(pm, p.finish(), color, 1.0, ts);
                     let txt = self.width.to_string();
                     let e = text::extents(Weight::Regular, 9.0 * u, &txt);
-                    draw::text(pm, Weight::Regular, 9.0 * u, &txt, cx - e.x_advance / 2.0, b.bottom() - 3.0 * u, [0.9, 0.9, 0.92], 1.0, ts);
+                    draw::text(
+                        pm,
+                        Weight::Regular,
+                        9.0 * u,
+                        &txt,
+                        cx - e.x_advance / 2.0,
+                        b.bottom() - 3.0 * u,
+                        [0.9, 0.9, 0.92],
+                        1.0,
+                        ts,
+                    );
                 }
                 Item::Undo => draw::icon(pm, "undo", cx, cy, u, color, ts),
                 Item::Redo => draw::icon(pm, "redo", cx, cy, u, color, ts),
+                Item::Upload => draw::icon(pm, "upload", cx, cy, u, color, ts),
                 Item::Ok => draw::icon(pm, "ok", cx, cy, u, color, ts),
                 Item::Close => draw::icon(pm, "close", cx, cy, u, color, ts),
                 Item::Bar => {}
@@ -820,8 +1006,24 @@ impl Overlay {
                 if ly + 24.0 * u > g.bottom() {
                     ly = ty - 30.0 * u;
                 }
-                draw::fill(pm, draw::rounded_rect(lx, ly, e.x_advance + 16.0 * u, 24.0 * u, 5.0 * u), [0.0, 0.0, 0.0], 0.85, ts);
-                draw::text(pm, Weight::Regular, fs, &tip, lx + 8.0 * u, ly + 16.0 * u, [1.0, 1.0, 1.0], 1.0, ts);
+                draw::fill(
+                    pm,
+                    draw::rounded_rect(lx, ly, e.x_advance + 16.0 * u, 24.0 * u, 5.0 * u),
+                    [0.0, 0.0, 0.0],
+                    0.85,
+                    ts,
+                );
+                draw::text(
+                    pm,
+                    Weight::Regular,
+                    fs,
+                    &tip,
+                    lx + 8.0 * u,
+                    ly + 16.0 * u,
+                    [1.0, 1.0, 1.0],
+                    1.0,
+                    ts,
+                );
             }
         }
     }
@@ -843,7 +1045,17 @@ impl Overlay {
             let msg = "Arraste para selecionar a área · Esc para cancelar";
             let fs = 18.0 * u;
             let e = text::extents(Weight::Bold, fs, msg);
-            draw::text(frame, Weight::Bold, fs, msg, m.img.x + (m.img.w - e.width) / 2.0, m.img.y + m.img.h / 2.0, [1.0, 1.0, 1.0], 1.0, ts);
+            draw::text(
+                frame,
+                Weight::Bold,
+                fs,
+                msg,
+                m.img.x + (m.img.w - e.width) / 2.0,
+                m.img.y + m.img.h / 2.0,
+                [1.0, 1.0, 1.0],
+                1.0,
+                ts,
+            );
             return;
         };
         self.ensure_scene();
@@ -852,7 +1064,14 @@ impl Overlay {
         }
         let (x, y, w, h) = (r.x, r.y, r.w, r.h);
         let blue = [0.20, 0.60, 1.0];
-        draw::stroke(frame, draw::rect_path(x, y, w, h), blue, 1.0, &Line::butt(2.0 * u), ts);
+        draw::stroke(
+            frame,
+            draw::rect_path(x, y, w, h),
+            blue,
+            1.0,
+            &Line::butt(2.0 * u),
+            ts,
+        );
         let mut hp = Pb::new();
         for (hx, hy) in [
             (x, y),
@@ -873,11 +1092,30 @@ impl Overlay {
         let e = text::extents(Weight::Bold, fs, &label);
         let tb_above = self.toolbar().is_some_and(|t| t.rect.y < y);
         let above_free = y - m.img.y > 30.0 * u && !tb_above;
-        let ly = if above_free { y - 10.0 * u } else { y + e.height + 14.0 * u };
+        let ly = if above_free {
+            y - 10.0 * u
+        } else {
+            y + e.height + 14.0 * u
+        };
         let lx = x + if above_free { 2.0 } else { 8.0 } * u;
-        let bg = draw::rect_path(lx - 6.0 * u, ly - e.height - 6.0 * u, e.width + 12.0 * u, e.height + 12.0 * u);
+        let bg = draw::rect_path(
+            lx - 6.0 * u,
+            ly - e.height - 6.0 * u,
+            e.width + 12.0 * u,
+            e.height + 12.0 * u,
+        );
         draw::fill(frame, bg, [0.0, 0.0, 0.0], 0.75, ts);
-        draw::text(frame, Weight::Bold, fs, &label, lx, ly, [1.0, 1.0, 1.0], 1.0, ts);
+        draw::text(
+            frame,
+            Weight::Bold,
+            fs,
+            &label,
+            lx,
+            ly,
+            [1.0, 1.0, 1.0],
+            1.0,
+            ts,
+        );
         self.draw_toolbar(frame, ts);
     }
 
@@ -929,8 +1167,14 @@ impl Overlay {
 
         if button == MouseButton::Left {
             let near = |px: f32, py: f32| (px - x).abs() <= 4.0 * ui && (py - y).abs() <= 4.0 * ui;
-            let first = self.last_press.filter(|&(t, px, py)| now - t < DOUBLE_CLICK && near(px, py));
-            self.last_press = if first.is_some() { None } else { Some((now, x, y)) };
+            let first = self
+                .last_press
+                .filter(|&(t, px, py)| now - t < DOUBLE_CLICK && near(px, py));
+            self.last_press = if first.is_some() {
+                None
+            } else {
+                Some((now, x, y))
+            };
             if let Some((first_t, _, _)) = first.filter(|_| self.sel.contains(x, y)) {
                 // desfaz o que o primeiro clique criou (passo, texto vazio...)
                 self.drawing = None;
@@ -941,7 +1185,11 @@ impl Overlay {
                     .map(|(_, id)| *id)
                     .collect();
                 self.anns.retain(|a| !recent.contains(&a.id));
-                if self.editing.as_ref().is_some_and(|e| e.text.trim().is_empty()) {
+                if self
+                    .editing
+                    .as_ref()
+                    .is_some_and(|e| e.text.trim().is_empty())
+                {
                     self.editing = None;
                 }
                 self.sel.mode = None;
@@ -1065,11 +1313,16 @@ impl Overlay {
             }
             Item::Color(c) => self.set_color(c),
             Item::Width => {
-                let next = WIDTHS.iter().copied().find(|&w| w > self.width).unwrap_or(WIDTHS[0]);
+                let next = WIDTHS
+                    .iter()
+                    .copied()
+                    .find(|&w| w > self.width)
+                    .unwrap_or(WIDTHS[0]);
                 self.set_width(next);
             }
             Item::Undo => self.undo(),
             Item::Redo => self.redo(),
+            Item::Upload => return self.upload(),
             Item::Ok => return self.confirm(),
             Item::Close => return self.close(),
             Item::Bar => {}
@@ -1095,6 +1348,11 @@ impl Overlay {
                     self.confirm();
                     return;
                 }
+                _ if ctrl && k.ch == Some('u') => {
+                    self.commit_text();
+                    self.upload();
+                    return;
+                }
                 _ if ctrl && k.ch == Some('z') => self.editing = None,
                 Some(NamedKey::Backspace) => {
                     ed.text.pop();
@@ -1112,12 +1370,19 @@ impl Overlay {
 
         let arrow = matches!(
             named,
-            Some(NamedKey::ArrowLeft | NamedKey::ArrowRight | NamedKey::ArrowUp | NamedKey::ArrowDown)
+            Some(
+                NamedKey::ArrowLeft
+                    | NamedKey::ArrowRight
+                    | NamedKey::ArrowUp
+                    | NamedKey::ArrowDown
+            )
         );
         if named == Some(NamedKey::Escape) {
             self.close();
         } else if enter || named == Some(NamedKey::Insert) || (ctrl && k.ch == Some('c')) {
             self.confirm();
+        } else if ctrl && k.ch == Some('u') {
+            self.upload();
         } else if ctrl && k.ch == Some('z') {
             if shift {
                 self.redo()
@@ -1148,7 +1413,10 @@ impl Overlay {
             self.set_width(self.width + 1);
         } else if k.ch == Some('-') {
             self.set_width(self.width - 1);
-        } else if let Some(d) = k.ch.and_then(|c| c.to_digit(10)).filter(|d| (1..=COLORS.len() as u32).contains(d)) {
+        } else if let Some(d) =
+            k.ch.and_then(|c| c.to_digit(10))
+                .filter(|d| (1..=COLORS.len() as u32).contains(d))
+        {
             self.set_color(d as usize - 1);
         } else if let Some(t) = k.ch.and_then(Tool::from_key) {
             self.tool = t;
@@ -1159,14 +1427,26 @@ impl Overlay {
 
     /// Pedido de captura enquanto a sobreposição já está aberta (tecla Insert global).
     pub fn insert_pressed(&mut self) {
-        self.key(&KeyInput { named: Some(NamedKey::Insert), ..Default::default() });
+        self.key(&KeyInput {
+            named: Some(NamedKey::Insert),
+            ..Default::default()
+        });
     }
 }
 
 // ---------------------------------------------------------------- pixels
 /// Copia um retângulo `w×h` de `src` (em sx, sy) para `dst` (em dx, dy), recortando bordas.
 #[allow(clippy::too_many_arguments)]
-pub fn copy_region(src: &Pixmap, sx: i32, sy: i32, dst: &mut Pixmap, dx: i32, dy: i32, w: u32, h: u32) {
+pub fn copy_region(
+    src: &Pixmap,
+    sx: i32,
+    sy: i32,
+    dst: &mut Pixmap,
+    dx: i32,
+    dy: i32,
+    w: u32,
+    h: u32,
+) {
     let (sw, shh) = (src.width() as i32, src.height() as i32);
     let (dw, dh) = (dst.width() as i32, dst.height() as i32);
     // intervalo válido de deslocamentos (i, j) dentro do retângulo
@@ -1189,12 +1469,16 @@ pub fn copy_region(src: &Pixmap, sx: i32, sy: i32, dst: &mut Pixmap, dx: i32, dy
 
 /// Desenha `src` (posicionado em x, y no espaço da imagem) em `dst` usando `ts`.
 fn blit(dst: &mut Pixmap, src: &Pixmap, x: f32, y: f32, ts: Transform) {
-    let unit = (ts.sx - 1.0).abs() < 1e-4 && (ts.sy - 1.0).abs() < 1e-4 && ts.kx == 0.0 && ts.ky == 0.0;
+    let unit =
+        (ts.sx - 1.0).abs() < 1e-4 && (ts.sy - 1.0).abs() < 1e-4 && ts.kx == 0.0 && ts.ky == 0.0;
     if unit {
         let (dx, dy) = ((x + ts.tx).round() as i32, (y + ts.ty).round() as i32);
         copy_region(src, 0, 0, dst, dx, dy, src.width(), src.height());
     } else {
-        let paint = PixmapPaint { quality: FilterQuality::Bilinear, ..Default::default() };
+        let paint = PixmapPaint {
+            quality: FilterQuality::Bilinear,
+            ..Default::default()
+        };
         dst.draw_pixmap(0, 0, src.as_ref(), &paint, ts.pre_translate(x, y), None);
     }
 }
@@ -1205,7 +1489,7 @@ pub fn make_dim_background(base: &Pixmap, img: R, w: u32, h: u32) -> Pixmap {
     let k = w as f32 / img.w.max(1.0);
     let ts = Transform::from_row(k, 0.0, 0.0, k, -img.x * k, -img.y * k);
     blit(&mut pm, base, 0.0, 0.0, ts);
-    for px in pm.data_mut().chunks_exact_mut(4) {
+    for px in pm.data_mut().as_chunks_mut::<4>().0 {
         px[0] = ((px[0] as u32 * 141) >> 8) as u8;
         px[1] = ((px[1] as u32 * 141) >> 8) as u8;
         px[2] = ((px[2] as u32 * 141) >> 8) as u8;
@@ -1216,7 +1500,7 @@ pub fn make_dim_background(base: &Pixmap, img: R, w: u32, h: u32) -> Pixmap {
 
 /// Converte RGBA (opaco) para o formato 0RGB que o softbuffer espera.
 pub fn to_xrgb(src: &Pixmap, dst: &mut [u32]) {
-    for (d, s) in dst.iter_mut().zip(src.data().chunks_exact(4)) {
+    for (d, s) in dst.iter_mut().zip(src.data().as_chunks::<4>().0) {
         *d = (s[0] as u32) << 16 | (s[1] as u32) << 8 | s[2] as u32;
     }
 }
@@ -1229,11 +1513,20 @@ mod tests {
     fn overlay(w: u32, h: u32) -> Overlay {
         let mut base = Pixmap::new(w, h).unwrap();
         // gradiente simples para que pixelização e recortes tenham conteúdo
-        for (i, px) in base.data_mut().chunks_exact_mut(4).enumerate() {
+        for (i, px) in base
+            .data_mut()
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .enumerate()
+        {
             let (x, y) = (i as u32 % w, i as u32 / w);
             px.copy_from_slice(&[(x % 256) as u8, (y % 256) as u8, 128, 255]);
         }
-        let mons = vec![Mon { img: R::new(0.0, 0.0, w as f32, h as f32), ui: 1.0 }];
+        let mons = vec![Mon {
+            img: R::new(0.0, 0.0, w as f32, h as f32),
+            ui: 1.0,
+        }];
         Overlay::new(base, mons, &Config::default())
     }
 
@@ -1247,11 +1540,19 @@ mod tests {
     }
 
     fn key_char(o: &mut Overlay, c: char) {
-        o.key(&KeyInput { named: None, ch: Some(c), text: Some(c.to_string()) });
+        o.key(&KeyInput {
+            named: None,
+            ch: Some(c),
+            text: Some(c.to_string()),
+        });
     }
 
     fn key_named(o: &mut Overlay, n: NamedKey) {
-        o.key(&KeyInput { named: Some(n), ch: None, text: None });
+        o.key(&KeyInput {
+            named: Some(n),
+            ch: None,
+            text: None,
+        });
     }
 
     #[test]
@@ -1293,8 +1594,10 @@ mod tests {
 
     #[test]
     fn hit_test_edges_and_inside() {
-        let mut s = Selection::default();
-        s.rect = Some(R::new(100.0, 100.0, 100.0, 100.0));
+        let s = Selection {
+            rect: Some(R::new(100.0, 100.0, 100.0, 100.0)),
+            ..Default::default()
+        };
         assert_eq!(s.hit(100.0, 100.0, 8.0), Some(Mode::Edge(N | W)));
         assert_eq!(s.hit(205.0, 150.0, 8.0), Some(Mode::Edge(E)));
         assert_eq!(s.hit(150.0, 198.0, 8.0), Some(Mode::Edge(S)));
@@ -1487,8 +1790,36 @@ mod tests {
         assert!(o.anns.is_empty(), "cliques na barra não desenham");
         assert_eq!(o.cursor, CursorIcon::Default);
         assert!(!o.tooltip(Item::Width).is_empty());
+        assert!(!o.tooltip(Item::Upload).is_empty());
         click(&mut o, find(Item::Ok));
         assert_eq!(o.exit, Some(Exit::Confirm));
+    }
+
+    #[test]
+    fn upload_button_and_shortcut() {
+        let mut o = overlay(1000, 800);
+        // sem seleção, Ctrl+U não faz nada
+        o.mods = ModifiersState::CONTROL;
+        key_char(&mut o, 'u');
+        assert!(o.exit.is_none());
+        o.mods = ModifiersState::empty();
+        drag(&mut o, (300.0, 200.0), (700.0, 500.0));
+        let tb = o.toolbar().expect("barra visível");
+        // o botão da nuvem fica logo antes de confirmar e cancelar
+        let pos = |it: Item| tb.items.iter().position(|(i, _)| *i == it).unwrap();
+        assert_eq!(pos(Item::Upload) + 1, pos(Item::Ok));
+        assert_eq!(pos(Item::Ok) + 1, pos(Item::Close));
+        let r = tb.items[pos(Item::Upload)].1;
+        o.pointer_moved(r.cx(), r.cy());
+        o.press(MouseButton::Left);
+        o.release(MouseButton::Left);
+        assert_eq!(o.exit, Some(Exit::Upload));
+
+        let mut o = overlay(1000, 800);
+        drag(&mut o, (300.0, 200.0), (700.0, 500.0));
+        o.mods = ModifiersState::CONTROL;
+        key_char(&mut o, 'u');
+        assert_eq!(o.exit, Some(Exit::Upload));
     }
 
     #[test]
@@ -1510,7 +1841,10 @@ mod tests {
         assert_eq!((out.width(), out.height()), (200, 150));
         let before = o.base.pixel(150, 120).unwrap();
         let after = out.pixel(100, 70).unwrap();
-        assert!(after.red() > before.red(), "marca-texto vermelho deve avermelhar");
+        assert!(
+            after.red() > before.red(),
+            "marca-texto vermelho deve avermelhar"
+        );
         assert_eq!(after.alpha(), 255);
     }
 
@@ -1534,7 +1868,11 @@ mod tests {
         let out = o.render_output().unwrap();
         let a = out.pixel(16, 16).unwrap();
         let b = out.pixel(23, 23).unwrap();
-        assert_eq!((a.red(), a.green()), (b.red(), b.green()), "mesmo bloco, mesma cor");
+        assert_eq!(
+            (a.red(), a.green()),
+            (b.red(), b.green()),
+            "mesmo bloco, mesma cor"
+        );
         assert_eq!(a.red(), 19); // média de 16..24 = 19,5 → 19
         let c = out.pixel(24, 16).unwrap();
         assert_ne!(a.red(), c.red());
@@ -1543,7 +1881,10 @@ mod tests {
     #[test]
     fn render_window_and_hidpi_mapping() {
         let mut o = overlay(400, 300);
-        o.set_mons(vec![Mon { img: R::new(0.0, 0.0, 400.0, 300.0), ui: 2.0 }]);
+        o.set_mons(vec![Mon {
+            img: R::new(0.0, 0.0, 400.0, 300.0),
+            ui: 2.0,
+        }]);
         let dim = make_dim_background(&o.base, o.mons[0].img, 200, 150);
         assert_eq!(dim.width(), 200);
         let mut frame = Pixmap::new(200, 150).unwrap();

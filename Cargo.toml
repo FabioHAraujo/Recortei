@@ -1,9 +1,12 @@
 [package]
 name = "recortei"
-version = "2.0.0"
+version = "0.1.0"
 edition = "2021"
-description = "Captura de área de tela com anotações, estilo ShareX (Linux e Windows)"
-license = "MIT"
+description = "Captura de área de tela com anotações, leve e nativa (Windows e Linux)"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/FabioHAraujo/Recortei"
+readme = "README.md"
+authors = ["Fábio Henrique Araújo <contato@fabioharaujo.com.br>"]
 
 [dependencies]
 winit = { version = "0.30", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen"] }
@@ -16,6 +19,7 @@ serde_json = "1"
 dirs = "6"
 png = "0.18"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+ureq = "3"
 
 [target.'cfg(windows)'.dependencies]
 tray-icon = "0.26"

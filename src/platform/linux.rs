@@ -61,27 +61,45 @@ fn uri_to_path(uri: &str) -> Option<PathBuf> {
     use std::os::unix::ffi::OsStringExt;
     let rest = uri.strip_prefix("file://")?;
     let rest = rest.find('/').map(|i| &rest[i..])?; // ignora host ("file://host/...")
-    Some(PathBuf::from(std::ffi::OsString::from_vec(percent_decode(rest))))
+    Some(PathBuf::from(std::ffi::OsString::from_vec(percent_decode(
+        rest,
+    ))))
 }
 
 /// Tira um print da tela inteira via `org.freedesktop.portal.Screenshot`.
 fn portal_screenshot(c: &Connection) -> Result<Pixmap, String> {
-    let token = format!("recortei{}", std::process::id() as u64 * 1000 + rand_u16() as u64);
+    let token = format!(
+        "recortei{}",
+        std::process::id() as u64 * 1000 + rand_u16() as u64
+    );
     let sender = c
         .unique_name()
         .ok_or("conexão D-Bus sem nome")?
         .trim_start_matches(':')
         .replace('.', "_");
     let path = format!("/org/freedesktop/portal/desktop/request/{sender}/{token}");
-    let request = Proxy::new(c, PORTAL_DEST, path.as_str(), "org.freedesktop.portal.Request")
+    let request = Proxy::new(
+        c,
+        PORTAL_DEST,
+        path.as_str(),
+        "org.freedesktop.portal.Request",
+    )
+    .map_err(|e| e.to_string())?;
+    let mut responses = request
+        .receive_signal("Response")
         .map_err(|e| e.to_string())?;
-    let mut responses = request.receive_signal("Response").map_err(|e| e.to_string())?;
 
     let mut opts: HashMap<&str, Value> = HashMap::new();
     opts.insert("handle_token", Value::from(token.as_str()));
     opts.insert("interactive", Value::from(false));
-    c.call_method(Some(PORTAL_DEST), PORTAL_PATH, Some("org.freedesktop.portal.Screenshot"), "Screenshot", &("", opts))
-        .map_err(|e| format!("O portal de screenshot falhou: {e}"))?;
+    c.call_method(
+        Some(PORTAL_DEST),
+        PORTAL_PATH,
+        Some("org.freedesktop.portal.Screenshot"),
+        "Screenshot",
+        &("", opts),
+    )
+    .map_err(|e| format!("O portal de screenshot falhou: {e}"))?;
 
     let msg = responses.next().ok_or("o portal não respondeu")?;
     let (code, results): (u32, HashMap<String, OwnedValue>) =
@@ -102,7 +120,11 @@ fn portal_screenshot(c: &Connection) -> Result<Pixmap, String> {
 fn rand_u16() -> u16 {
     use std::hash::{BuildHasher, Hasher};
     let mut h = std::collections::hash_map::RandomState::new().build_hasher();
-    h.write_u64(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u64));
+    h.write_u64(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos() as u64),
+    );
     h.finish() as u16
 }
 
@@ -152,10 +174,14 @@ impl SniTray {
 fn argb_icon(size: u32) -> ksni::Icon {
     let rgba = draw::app_icon_rgba(size, false);
     let mut data = Vec::with_capacity(rgba.len());
-    for px in rgba.chunks_exact(4) {
+    for px in rgba.as_chunks::<4>().0 {
         data.extend_from_slice(&[px[3], px[0], px[1], px[2]]);
     }
-    ksni::Icon { width: size as i32, height: size as i32, data }
+    ksni::Icon {
+        width: size as i32,
+        height: size as i32,
+        data,
+    }
 }
 
 impl ksni::Tray for SniTray {
@@ -184,8 +210,12 @@ impl ksni::Tray for SniTray {
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
         use ksni::menu::{MenuItem, StandardItem};
         let item = |label: &str, ev: fn() -> UserEvent| -> MenuItem<Self> {
-            StandardItem { label: label.into(), activate: Box::new(move |t: &mut Self| t.send(ev())), ..Default::default() }
-                .into()
+            StandardItem {
+                label: label.into(),
+                activate: Box::new(move |t: &mut Self| t.send(ev())),
+                ..Default::default()
+            }
+            .into()
         };
         vec![
             item("Capturar área (Insert)", || UserEvent::CaptureDelayed),
@@ -224,7 +254,9 @@ pub fn open_folder(path: &Path) {
 // ---------------------------------------------------------------- instância única
 fn socket_addr() -> std::io::Result<SocketAddr> {
     use std::os::unix::fs::MetadataExt;
-    let uid = std::fs::metadata("/proc/self").map(|m| m.uid()).unwrap_or(0);
+    let uid = std::fs::metadata("/proc/self")
+        .map(|m| m.uid())
+        .unwrap_or(0);
     SocketAddr::from_abstract_name(format!("{APP_ID}.{uid}").as_bytes())
 }
 
@@ -270,7 +302,9 @@ pub fn acquire_or_send(cmd: &str) -> Instance {
 impl Server {
     /// Recebe comandos de outras instâncias numa thread.
     pub fn serve(self, on_cmd: impl Fn(&str) + Send + 'static) {
-        let Some(listener) = self.listener else { return };
+        let Some(listener) = self.listener else {
+            return;
+        };
         std::thread::spawn(move || {
             for mut stream in listener.incoming().flatten() {
                 let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
@@ -296,7 +330,10 @@ mod tests {
             uri_to_path("file:///home/u/Imagens/Captura%20de%20tela%20%C3%A0s.png").unwrap(),
             PathBuf::from("/home/u/Imagens/Captura de tela às.png")
         );
-        assert_eq!(uri_to_path("file://localhost/tmp/a.png").unwrap(), PathBuf::from("/tmp/a.png"));
+        assert_eq!(
+            uri_to_path("file://localhost/tmp/a.png").unwrap(),
+            PathBuf::from("/tmp/a.png")
+        );
         assert!(uri_to_path("http://x/y").is_none());
         assert_eq!(percent_decode("a%2"), b"a%2");
     }

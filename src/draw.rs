@@ -3,8 +3,8 @@
 use std::f32::consts::PI;
 
 use tiny_skia::{
-    Color, FillRule, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, Rect, Stroke,
-    StrokeDash, Transform,
+    Color, FillRule, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, Rect, Stroke, StrokeDash,
+    Transform,
 };
 
 use crate::text::{self, Weight};
@@ -34,10 +34,20 @@ pub struct Line {
 
 impl Line {
     pub fn round(width: f32) -> Self {
-        Line { width, cap: LineCap::Round, join: LineJoin::Round, dash: None }
+        Line {
+            width,
+            cap: LineCap::Round,
+            join: LineJoin::Round,
+            dash: None,
+        }
     }
     pub fn butt(width: f32) -> Self {
-        Line { width, cap: LineCap::Butt, join: LineJoin::Miter, dash: None }
+        Line {
+            width,
+            cap: LineCap::Butt,
+            join: LineJoin::Miter,
+            dash: None,
+        }
     }
 }
 
@@ -70,7 +80,10 @@ impl Default for Pb {
 
 impl Pb {
     pub fn new() -> Self {
-        Pb { b: PathBuilder::new(), cur: false }
+        Pb {
+            b: PathBuilder::new(),
+            cur: false,
+        }
     }
     pub fn move_to(&mut self, x: f32, y: f32) -> &mut Self {
         self.b.move_to(x, y);
@@ -172,23 +185,58 @@ pub fn arrow_head(x1: f32, y1: f32, x2: f32, y2: f32, head: f32) -> Option<Path>
     let ang = (y2 - y1).atan2(x2 - x1);
     let mut p = Pb::new();
     p.move_to(x2, y2)
-        .line_to(x2 - head * (ang - 0.42).cos(), y2 - head * (ang - 0.42).sin())
-        .line_to(x2 - head * (ang + 0.42).cos(), y2 - head * (ang + 0.42).sin())
+        .line_to(
+            x2 - head * (ang - 0.42).cos(),
+            y2 - head * (ang - 0.42).sin(),
+        )
+        .line_to(
+            x2 - head * (ang + 0.42).cos(),
+            y2 - head * (ang + 0.42).sin(),
+        )
         .close();
     p.finish()
 }
 
 /// Desenha `s` com a linha de base em (x, y).
 #[allow(clippy::too_many_arguments)]
-pub fn text(pm: &mut Pixmap, w: Weight, size: f32, s: &str, x: f32, y: f32, c: Rgb, a: f32, ts: Transform) {
+pub fn text(
+    pm: &mut Pixmap,
+    w: Weight,
+    size: f32,
+    s: &str,
+    x: f32,
+    y: f32,
+    c: Rgb,
+    a: f32,
+    ts: Transform,
+) {
     fill(pm, text::path(w, size, s, x, y), c, a, ts);
 }
 
 /// Desenha `s` centralizado (pela tinta) em (cx, cy).
 #[allow(clippy::too_many_arguments)]
-pub fn text_centered(pm: &mut Pixmap, w: Weight, size: f32, s: &str, cx: f32, cy: f32, c: Rgb, ts: Transform) {
+pub fn text_centered(
+    pm: &mut Pixmap,
+    w: Weight,
+    size: f32,
+    s: &str,
+    cx: f32,
+    cy: f32,
+    c: Rgb,
+    ts: Transform,
+) {
     let e = text::extents(w, size, s);
-    text(pm, w, size, s, cx - e.width / 2.0 - e.x_bearing, cy - e.height / 2.0 - e.y_bearing, c, 1.0, ts);
+    text(
+        pm,
+        w,
+        size,
+        s,
+        cx - e.width / 2.0 - e.x_bearing,
+        cy - e.height / 2.0 - e.y_bearing,
+        c,
+        1.0,
+        ts,
+    );
 }
 
 pub const ICON_FG: Rgb = [0.93, 0.93, 0.95];
@@ -205,7 +253,13 @@ pub fn icon(pm: &mut Pixmap, kind: &str, cx: f32, cy: f32, u: f32, color: Rgb, t
                 let mut p = Pb::new();
                 p.move_to(0.0, 0.0).line_to(dx * 8.0, dy * 8.0);
                 stroke(pm, p.finish(), fg, 1.0, &ln, ts);
-                fill(pm, arrow_head(0.0, 0.0, dx * 9.0, dy * 9.0, 5.0), fg, 1.0, ts);
+                fill(
+                    pm,
+                    arrow_head(0.0, 0.0, dx * 9.0, dy * 9.0, 5.0),
+                    fg,
+                    1.0,
+                    ts,
+                );
             }
         }
         "pen" => {
@@ -254,7 +308,16 @@ pub fn icon(pm: &mut Pixmap, kind: &str, cx: f32, cy: f32, u: f32, color: Rgb, t
             let mut p = Pb::new();
             p.circle(0.0, 0.0, 9.0);
             fill(pm, p.finish(), fg, 1.0, ts);
-            text_centered(pm, Weight::Bold, 12.0, "1", 0.0, 0.0, [0.13, 0.13, 0.15], ts);
+            text_centered(
+                pm,
+                Weight::Bold,
+                12.0,
+                "1",
+                0.0,
+                0.0,
+                [0.13, 0.13, 0.15],
+                ts,
+            );
         }
         "undo" | "redo" => {
             let d = if kind == "undo" { -1.0 } else { 1.0 };
@@ -267,12 +330,50 @@ pub fn icon(pm: &mut Pixmap, kind: &str, cx: f32, cy: f32, u: f32, color: Rgb, t
         "ok" => {
             let mut p = Pb::new();
             p.move_to(-7.0, 0.0).line_to(-2.0, 6.0).line_to(8.0, -6.0);
-            stroke(pm, p.finish(), [0.35, 0.85, 0.45], 1.0, &Line::round(2.6), ts);
+            stroke(
+                pm,
+                p.finish(),
+                [0.35, 0.85, 0.45],
+                1.0,
+                &Line::round(2.6),
+                ts,
+            );
+        }
+        "upload" => {
+            // nuvem com uma seta para cima
+            let mut p = Pb::new();
+            p.move_to(-4.0, 6.0)
+                .line_to(-5.0, 6.0)
+                .curve_to(-11.0, 6.0, -11.0, -2.0, -5.5, -2.0)
+                .curve_to(-5.0, -9.0, 5.0, -10.0, 6.0, -3.0)
+                .curve_to(11.0, -3.0, 11.0, 6.0, 5.0, 6.0)
+                .line_to(4.0, 6.0);
+            stroke(pm, p.finish(), [0.45, 0.75, 1.0], 1.0, &ln, ts);
+            let mut p = Pb::new();
+            p.move_to(0.0, 9.0).line_to(0.0, 1.0);
+            stroke(pm, p.finish(), [0.45, 0.75, 1.0], 1.0, &ln, ts);
+            fill(
+                pm,
+                arrow_head(0.0, 6.0, 0.0, -1.0, 6.0),
+                [0.45, 0.75, 1.0],
+                1.0,
+                ts,
+            );
         }
         "close" => {
             let mut p = Pb::new();
-            p.move_to(-6.0, -6.0).line_to(6.0, 6.0).move_to(6.0, -6.0).line_to(-6.0, 6.0);
-            stroke(pm, p.finish(), [0.95, 0.45, 0.45], 1.0, &Line::round(2.4), ts);
+            p.move_to(-6.0, -6.0)
+                .line_to(6.0, 6.0)
+                .move_to(6.0, -6.0)
+                .line_to(-6.0, 6.0);
+            stroke(
+                pm,
+                p.finish(),
+                [0.95, 0.45, 0.45],
+                1.0,
+                &Line::round(2.4),
+                ts,
+            );
         }
         _ => {}
     }
@@ -284,7 +385,12 @@ pub fn app_icon_rgba(size: u32, badge: bool) -> Vec<u8> {
     let mut pm = Pixmap::new(size, size).expect("tamanho do ícone");
     let s = size as f32 / 22.0;
     let ts = Transform::from_scale(s, s);
-    let ln = Line { width: 2.0, cap: LineCap::Round, join: LineJoin::Miter, dash: None };
+    let ln = Line {
+        width: 2.0,
+        cap: LineCap::Round,
+        join: LineJoin::Miter,
+        dash: None,
+    };
     let marks = || {
         let mut p = Pb::new();
         p.move_to(6.0, 2.0).line_to(6.0, 16.0).line_to(20.0, 16.0);
@@ -292,13 +398,36 @@ pub fn app_icon_rgba(size: u32, badge: bool) -> Vec<u8> {
         p.finish()
     };
     if badge {
-        fill(&mut pm, rounded_rect(0.0, 0.0, 22.0, 22.0, 5.0), [0.13, 0.47, 0.95], 1.0, ts);
+        fill(
+            &mut pm,
+            rounded_rect(0.0, 0.0, 22.0, 22.0, 5.0),
+            [0.13, 0.47, 0.95],
+            1.0,
+            ts,
+        );
         // marcas um pouco menores para caber dentro do quadrado
         let inner = ts.pre_translate(2.2, 2.2).pre_scale(0.8, 0.8);
-        stroke(&mut pm, marks(), [1.0, 1.0, 1.0], 1.0, &Line { width: 2.4, ..ln }, inner);
+        stroke(
+            &mut pm,
+            marks(),
+            [1.0, 1.0, 1.0],
+            1.0,
+            &Line { width: 2.4, ..ln },
+            inner,
+        );
     } else {
         // sombra leve para o ícone aparecer em painéis claros
-        stroke(&mut pm, marks(), [0.0, 0.0, 0.0], 0.45, &Line { width: 3.6, ..ln.clone() }, ts);
+        stroke(
+            &mut pm,
+            marks(),
+            [0.0, 0.0, 0.0],
+            0.45,
+            &Line {
+                width: 3.6,
+                ..ln.clone()
+            },
+            ts,
+        );
         stroke(&mut pm, marks(), [1.0, 1.0, 1.0], 1.0, &ln, ts);
     }
     pm.take_demultiplied()
@@ -312,17 +441,28 @@ mod tests {
     fn icons_render_without_panicking() {
         let mut pm = Pixmap::new(64, 64).unwrap();
         for k in [
-            "move", "pen", "line", "arrow", "rect", "ellipse", "text", "marker", "pixelate", "step",
-            "undo", "redo", "ok", "close",
+            "move", "pen", "line", "arrow", "rect", "ellipse", "text", "marker", "pixelate",
+            "step", "undo", "redo", "upload", "ok", "close",
         ] {
             pm.fill(Color::TRANSPARENT);
-            icon(&mut pm, k, 32.0, 32.0, 1.5, [1.0, 0.0, 0.0], Transform::identity());
-            assert!(pm.pixels().iter().any(|p| p.alpha() > 0), "ícone vazio: {k}");
+            icon(
+                &mut pm,
+                k,
+                32.0,
+                32.0,
+                1.5,
+                [1.0, 0.0, 0.0],
+                Transform::identity(),
+            );
+            assert!(
+                pm.pixels().iter().any(|p| p.alpha() > 0),
+                "ícone vazio: {k}"
+            );
         }
         for badge in [false, true] {
             let rgba = app_icon_rgba(32, badge);
             assert_eq!(rgba.len(), 32 * 32 * 4);
-            assert!(rgba.chunks_exact(4).any(|p| p[3] == 255));
+            assert!(rgba.as_chunks::<4>().0.iter().any(|p| p[3] == 255));
         }
     }
 

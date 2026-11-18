@@ -13,7 +13,8 @@ use windows_sys::Win32::Foundation::{
 };
 use windows_sys::Win32::Graphics::Gdi::{
     BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits,
-    ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, CAPTUREBLT, DIB_RGB_COLORS, SRCCOPY,
+    ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, CAPTUREBLT, DIB_RGB_COLORS,
+    SRCCOPY,
 };
 use windows_sys::Win32::Storage::FileSystem::{ReadFile, PIPE_ACCESS_INBOUND};
 use windows_sys::Win32::System::Pipes::{
@@ -65,7 +66,15 @@ pub fn capture_screen() -> Result<Pixmap, String> {
         bi.bmiHeader.biBitCount = 32;
         bi.bmiHeader.biCompression = BI_RGB;
         let mut buf = vec![0u8; w as usize * h as usize * 4];
-        let lines = GetDIBits(mem, bmp, 0, h as u32, buf.as_mut_ptr() as *mut c_void, &mut bi, DIB_RGB_COLORS);
+        let lines = GetDIBits(
+            mem,
+            bmp,
+            0,
+            h as u32,
+            buf.as_mut_ptr() as *mut c_void,
+            &mut bi,
+            DIB_RGB_COLORS,
+        );
 
         DeleteObject(bmp as _);
         DeleteDC(mem);
@@ -74,7 +83,7 @@ pub fn capture_screen() -> Result<Pixmap, String> {
         if ok == 0 || lines == 0 {
             return Err("BitBlt/GetDIBits falhou".into());
         }
-        for px in buf.chunks_exact_mut(4) {
+        for px in buf.as_chunks_mut::<4>().0 {
             px.swap(0, 2); // BGRA → RGBA
             px[3] = 255;
         }
@@ -148,7 +157,12 @@ impl Tray {
         }));
         let p = std::sync::Mutex::new(proxy);
         TrayIconEvent::set_event_handler(Some(move |e: TrayIconEvent| {
-            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = e {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = e
+            {
                 if let Ok(p) = p.lock() {
                     let _ = p.send_event(UserEvent::CaptureDelayed);
                 }
@@ -156,7 +170,8 @@ impl Tray {
         }));
 
         let size = 32;
-        let icon = Icon::from_rgba(draw::app_icon_rgba(size, true), size, size).map_err(|e| e.to_string())?;
+        let icon = Icon::from_rgba(draw::app_icon_rgba(size, true), size, size)
+            .map_err(|e| e.to_string())?;
         let tray = TrayIconBuilder::new()
             .with_id("recortei")
             .with_icon(icon)
@@ -203,7 +218,9 @@ pub fn acquire_or_send(cmd: &str) -> Instance {
         let name = wide(r"Local\io.github.recortei");
         let mutex = CreateMutexW(std::ptr::null(), 0, name.as_ptr());
         if !mutex.is_null() && GetLastError() != ERROR_ALREADY_EXISTS {
-            return Instance::Primary(Server { _mutex: mutex as isize });
+            return Instance::Primary(Server {
+                _mutex: mutex as isize,
+            });
         }
         if !mutex.is_null() {
             CloseHandle(mutex);
@@ -239,7 +256,10 @@ impl Server {
                     CreateNamedPipeW(
                         name.as_ptr(),
                         PIPE_ACCESS_INBOUND,
-                        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+                        PIPE_TYPE_BYTE
+                            | PIPE_READMODE_BYTE
+                            | PIPE_WAIT
+                            | PIPE_REJECT_REMOTE_CLIENTS,
                         PIPE_UNLIMITED_INSTANCES,
                         0,
                         4096,
@@ -258,7 +278,9 @@ impl Server {
                     let mut buf = [0u8; 512];
                     loop {
                         let mut n = 0u32;
-                        let ok = unsafe { ReadFile(h, buf.as_mut_ptr(), buf.len() as u32, &mut n, null_mut()) };
+                        let ok = unsafe {
+                            ReadFile(h, buf.as_mut_ptr(), buf.len() as u32, &mut n, null_mut())
+                        };
                         if ok == 0 || n == 0 {
                             break;
                         }

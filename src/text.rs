@@ -19,7 +19,9 @@ fn font(weight: Weight) -> &'static FontRef<'static> {
     static BOLD: OnceLock<FontRef<'static>> = OnceLock::new();
     static REGULAR: OnceLock<FontRef<'static>> = OnceLock::new();
     match weight {
-        Weight::Bold => BOLD.get_or_init(|| FontRef::try_from_slice(BOLD_TTF).expect("fonte embutida")),
+        Weight::Bold => {
+            BOLD.get_or_init(|| FontRef::try_from_slice(BOLD_TTF).expect("fonte embutida"))
+        }
         Weight::Regular => {
             REGULAR.get_or_init(|| FontRef::try_from_slice(REGULAR_TTF).expect("fonte embutida"))
         }
@@ -82,7 +84,10 @@ pub fn extents(weight: Weight, size: f32, s: &str) -> Extents {
         if let Some(o) = f.outline(gid) {
             // unidades da fonte têm y para cima; convertemos para y para baixo.
             // (o ab_glyph guarda min.y = topo, max.y = base; usamos min/max por segurança)
-            let (top, bottom) = (o.bounds.min.y.max(o.bounds.max.y), o.bounds.min.y.min(o.bounds.max.y));
+            let (top, bottom) = (
+                o.bounds.min.y.max(o.bounds.max.y),
+                o.bounds.min.y.min(o.bounds.max.y),
+            );
             x0 = x0.min(pen + o.bounds.min.x * sf);
             x1 = x1.max(pen + o.bounds.max.x * sf);
             y0 = y0.min(-top * sf);
@@ -90,9 +95,18 @@ pub fn extents(weight: Weight, size: f32, s: &str) -> Extents {
         }
     });
     if x0 > x1 {
-        return Extents { x_advance: adv, ..Default::default() };
+        return Extents {
+            x_advance: adv,
+            ..Default::default()
+        };
     }
-    Extents { x_bearing: x0, y_bearing: y0, width: x1 - x0, height: y1 - y0, x_advance: adv }
+    Extents {
+        x_bearing: x0,
+        y_bearing: y0,
+        width: x1 - x0,
+        height: y1 - y0,
+        x_advance: adv,
+    }
 }
 
 /// Caminho do texto com a linha de base começando em (x, y), como `cairo_show_text`.
@@ -156,7 +170,10 @@ mod tests {
         // o caminho fica acima da linha de base e bate com as extensões
         let b = path(Weight::Bold, 20.0, "Ab", 10.0, 50.0).unwrap().bounds();
         assert!((b.top() - (50.0 + e.y_bearing)).abs() < 0.5, "{b:?} {e:?}");
-        assert!((b.bottom() - (50.0 + e.y_bearing + e.height)).abs() < 0.5, "{b:?}");
+        assert!(
+            (b.bottom() - (50.0 + e.y_bearing + e.height)).abs() < 0.5,
+            "{b:?}"
+        );
         assert!((b.left() - (10.0 + e.x_bearing)).abs() < 0.5, "{b:?}");
         assert!(path(Weight::Regular, 12.0, " ", 0.0, 0.0).is_none());
     }

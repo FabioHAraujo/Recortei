@@ -15,7 +15,9 @@ mod draw;
 mod output;
 mod overlay;
 mod platform;
+mod setup;
 mod text;
+mod upload;
 
 const HELP: &str = "Recortei — captura de área de tela com anotações
 
@@ -24,6 +26,9 @@ Uso: recortei [opção]
   (sem opção)   inicia na bandeja (Insert captura)
   --capture     captura agora (inicia o app se não estiver rodando)
   --quit        encerra a instância em execução
+  --setup       Linux: configura início automático, atalho Insert do GNOME
+                e permissão do portal de screenshot (feito sozinho na
+                primeira abertura; pode repetir à vontade)
   --version     mostra a versão
   --help        mostra esta ajuda";
 
@@ -39,6 +44,9 @@ fn main() {
         }
         return;
     }
+    if has("--setup") {
+        std::process::exit(setup::run());
+    }
     let cmd = if has("--quit") {
         "quit"
     } else if has("--capture") {
@@ -52,6 +60,7 @@ fn main() {
             if cmd == "quit" {
                 return; // nada rodando para encerrar
             }
+            setup::first_run();
             if let Err(e) = app::run(server, cmd == "capture") {
                 platform::attach_console();
                 eprintln!("Recortei: {e}");
