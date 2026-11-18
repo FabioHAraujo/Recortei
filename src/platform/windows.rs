@@ -1,10 +1,12 @@
-//! Windows: captura via GDI, bandeja (tray-icon), tecla Insert global
-//! (RegisterHotKey) e instância única (mutex + named pipe).
+//! Windows: captura via GDI, bandeja (tray-icon), atalho global configurável
+//! (RegisterHotKey), aviso da Ferramenta de Captura na tecla Print Screen e
+//! instância única (mutex + named pipe).
 
 use std::ffi::c_void;
 use std::io::Write;
 use std::path::Path;
 use std::ptr::null_mut;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tiny_skia::{IntSize, Pixmap};
@@ -21,17 +23,38 @@ use windows_sys::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, WaitNamedPipeW, PIPE_READMODE_BYTE,
     PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
 };
+use windows_sys::Win32::System::Registry::{
+    RegGetValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_DWORD, RRF_RT_REG_DWORD,
+};
 use windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId;
-use windows_sys::Win32::System::Threading::{CreateMutexW, GetCurrentProcessId};
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, MOD_NOREPEAT, VK_INSERT};
+use windows_sys::Win32::System::Threading::{
+    CreateMutexW, GetCurrentProcessId, GetCurrentThreadId,
+};
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+    RegisterHotKey, UnregisterHotKey, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MOD_WIN,
+    VK_F1, VK_F24, VK_INSERT, VK_PAUSE, VK_SNAPSHOT,
+};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetMessageW, GetSystemMetrics, MSG, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
-    SM_YVIRTUALSCREEN, WM_HOTKEY,
+    GetMessageW, GetSystemMetrics, PeekMessageW, PostThreadMessageW, MSG, PM_NOREMOVE,
+    SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, WM_APP,
+    WM_HOTKEY,
 };
 use winit::event_loop::EventLoopProxy;
 
 use crate::app::UserEvent;
 use crate::draw;
+use crate::hotkey::{self, Hotkey, Status};
+
+// Os códigos do hotkey.rs são os mesmos do Win32.
+const _: () = {
+    assert!(hotkey::MOD_ALT == MOD_ALT);
+    assert!(hotkey::MOD_CONTROL == MOD_CONTROL);
+    assert!(hotkey::MOD_SHIFT == MOD_SHIFT);
+    assert!(hotkey::MOD_WIN == MOD_WIN);
+    assert!(hotkey::MOD_NOREPEAT == MOD_NOREPEAT);
+    assert!(VK_SNAPSHOT == 0x2C && VK_INSERT == 0x2D && VK_PAUSE == 0x13);
+    assert!(VK_F1 == 0x70 && VK_F24 == 0x87);
+};
 
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -106,48 +129,184 @@ impl Capturer {
     }
 }
 
-// ---------------------------------------------------------------- tecla Insert global
-pub fn start_hotkey(proxy: EventLoopProxy<UserEvent>) {
-    std::thread::spawn(move || unsafe {
-        // hwnd nulo: WM_HOTKEY vai para a fila de mensagens desta thread
-        if RegisterHotKey(null_mut(), 1, MOD_NOREPEAT, VK_INSERT as u32) == 0 {
-            let _ = proxy.send_event(UserEvent::Warn(
-                "Tecla Insert indisponível".into(),
-                "Outro programa já usa a tecla Insert. Capture pelo ícone da bandeja.".into(),
-            ));
-            return;
-        }
-        let mut msg: MSG = std::mem::zeroed();
-        while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
-            if msg.message == WM_HOTKEY {
-                let _ = proxy.send_event(UserEvent::Capture);
+// ---------------------------------------------------------------- atalho global
+/// Pede à thread do atalho para registrar de novo o que está em `want`.
+const WM_REREGISTER: u32 = WM_APP + 1;
+
+/// Thread com fila de mensagens que registra o atalho (hwnd nulo: o
+/// `WM_HOTKEY` vai para a fila dela) e o troca na hora quando pedido.
+pub struct Hotkeys {
+    thread: u32,
+    want: Arc<Mutex<Option<Hotkey>>>,
+}
+
+impl Hotkeys {
+    pub fn start(proxy: EventLoopProxy<UserEvent>, hk: Hotkey) -> Self {
+        let want = Arc::new(Mutex::new(Some(hk)));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let w = want.clone();
+        std::thread::spawn(move || unsafe {
+            let mut msg: MSG = std::mem::zeroed();
+            // cria a fila de mensagens antes de alguém postar nela
+            PeekMessageW(&mut msg, null_mut(), WM_APP, WM_APP, PM_NOREMOVE);
+            let _ = tx.send(GetCurrentThreadId());
+            let mut registered = false;
+            register(&w, &mut registered, &proxy);
+            while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
+                match msg.message {
+                    WM_HOTKEY => {
+                        let _ = proxy.send_event(UserEvent::Capture);
+                    }
+                    WM_REREGISTER => register(&w, &mut registered, &proxy),
+                    _ => {}
+                }
             }
+        });
+        Hotkeys {
+            thread: rx.recv().unwrap_or(0),
+            want,
         }
-    });
+    }
+
+    fn set(&self, hk: Option<Hotkey>) {
+        if let Ok(mut w) = self.want.lock() {
+            *w = hk;
+        }
+        unsafe { PostThreadMessageW(self.thread, WM_REREGISTER, 0, 0) };
+    }
+
+    /// Troca o atalho; o resultado chega como `UserEvent::Hotkey`.
+    pub fn apply(&self, hk: Hotkey) {
+        self.set(Some(hk));
+    }
+
+    /// O estado já é conhecido (vem do registro).
+    pub fn refresh(&self, _hk: Hotkey) {}
+
+    /// Solta o atalho enquanto a janela de Configurações grava outro.
+    pub fn pause(&self) {
+        self.set(None);
+    }
+
+    pub fn resume(&self, hk: Hotkey) {
+        self.set(Some(hk));
+    }
+}
+
+unsafe fn register(
+    want: &Mutex<Option<Hotkey>>,
+    registered: &mut bool,
+    proxy: &EventLoopProxy<UserEvent>,
+) {
+    if *registered {
+        UnregisterHotKey(null_mut(), 1);
+        *registered = false;
+    }
+    let Some(hk) = want.lock().ok().and_then(|w| *w) else {
+        return;
+    };
+    let (mods, vk) = hk.windows();
+    *registered = RegisterHotKey(null_mut(), 1, mods, vk) != 0;
+    let status = if *registered {
+        Status::Active
+    } else {
+        Status::Taken
+    };
+    let _ = proxy.send_event(UserEvent::Hotkey(status));
+}
+
+// ---------------------------------------------------------------- Ferramenta de Captura
+/// "Usar a tecla Print Screen para abrir a captura de tela" (Windows 11).
+const KEYBOARD_KEY: &str = r"Control Panel\Keyboard";
+const SNIPPING_VALUE: &str = "PrintScreenKeyForSnippingEnabled";
+
+/// A Ferramenta de Captura do Windows está com a tecla Print Screen? Valor
+/// ausente conta como "não sei", não como ligado.
+pub fn snipping_tool_owns_print_screen() -> bool {
+    read_dword(KEYBOARD_KEY, SNIPPING_VALUE) == Some(1)
+}
+
+/// Tema dos apps no Windows (`AppsUseLightTheme`): `Some(true)` claro.
+pub fn prefers_light() -> Option<bool> {
+    read_dword(
+        r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+        "AppsUseLightTheme",
+    )
+    .map(|v| v != 0)
+}
+
+/// DWORD de `HKEY_CURRENT_USER\<key>`.
+fn read_dword(key: &str, value: &str) -> Option<u32> {
+    let (key, value) = (wide(key), wide(value));
+    let mut data = 0u32;
+    let mut size = std::mem::size_of::<u32>() as u32;
+    let rc = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            value.as_ptr(),
+            RRF_RT_REG_DWORD,
+            null_mut(),
+            &mut data as *mut u32 as *mut c_void,
+            &mut size,
+        )
+    };
+    (rc == 0).then_some(data)
+}
+
+/// Desliga a opção (por usuário, sem administrador). Só roda quando o
+/// usuário clica em "Desativar no Windows".
+pub fn disable_snipping_tool_print_screen() -> Result<(), String> {
+    let (key, value) = (wide(KEYBOARD_KEY), wide(SNIPPING_VALUE));
+    let zero = 0u32;
+    let rc = unsafe {
+        RegSetKeyValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            value.as_ptr(),
+            REG_DWORD,
+            &zero as *const u32 as *const c_void,
+            std::mem::size_of::<u32>() as u32,
+        )
+    };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(format!("erro {rc} ao gravar no registro"))
+    }
 }
 
 // ---------------------------------------------------------------- bandeja
 pub struct Tray {
-    _icon: tray_icon::TrayIcon,
+    icon: tray_icon::TrayIcon,
+    capture: tray_icon::menu::MenuItem,
 }
 
 impl Tray {
-    pub fn new(proxy: EventLoopProxy<UserEvent>) -> Result<Self, String> {
+    pub fn new(proxy: EventLoopProxy<UserEvent>, hotkey: &str) -> Result<Self, String> {
         use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
         use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
         let menu = Menu::new();
-        let capture = MenuItem::with_id("capture", "Capturar área (Insert)", true, None);
+        let capture = MenuItem::with_id("capture", super::capture_item(hotkey), true, None);
         let folder = MenuItem::with_id("folder", "Abrir pasta de recortes", true, None);
+        let settings = MenuItem::with_id("settings", "Configurações…", true, None);
         let quit = MenuItem::with_id("quit", "Sair", true, None);
-        menu.append_items(&[&capture, &folder, &PredefinedMenuItem::separator(), &quit])
-            .map_err(|e| e.to_string())?;
+        menu.append_items(&[
+            &capture,
+            &folder,
+            &settings,
+            &PredefinedMenuItem::separator(),
+            &quit,
+        ])
+        .map_err(|e| e.to_string())?;
 
         let p = std::sync::Mutex::new(proxy.clone());
         MenuEvent::set_event_handler(Some(move |e: MenuEvent| {
             let ev = match e.id().0.as_str() {
                 "capture" => UserEvent::CaptureDelayed,
                 "folder" => UserEvent::OpenFolder,
+                "settings" => UserEvent::OpenSettings,
                 "quit" => UserEvent::Quit,
                 _ => return,
             };
@@ -175,12 +334,23 @@ impl Tray {
         let tray = TrayIconBuilder::new()
             .with_id("recortei")
             .with_icon(icon)
-            .with_tooltip("Recortei — Insert para capturar")
+            .with_tooltip(format!("Recortei — {}", super::tooltip(hotkey)))
             .with_menu(Box::new(menu))
             .with_menu_on_left_click(false)
             .build()
             .map_err(|e| e.to_string())?;
-        Ok(Tray { _icon: tray })
+        Ok(Tray {
+            icon: tray,
+            capture,
+        })
+    }
+
+    /// Atualiza os textos quando o atalho muda.
+    pub fn set_hotkey(&self, hotkey: &str) {
+        self.capture.set_text(super::capture_item(hotkey));
+        let _ = self
+            .icon
+            .set_tooltip(Some(format!("Recortei — {}", super::tooltip(hotkey))));
     }
 }
 

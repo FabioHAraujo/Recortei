@@ -21,9 +21,10 @@ homepage: https://github.com/FabioHAraujo/Recortei
 license: GPL-3.0-or-later
 description: |-
   Captura de área de tela com anotações, leve e nativa.
-  Fica na bandeja do sistema; a tecla Insert seleciona uma área da tela, que
-  pode ser anotada (caneta, setas, retângulos, texto, marca-texto, pixelizar,
-  numeração) e depois copiada, salva em PNG ou enviada por link.
+  Fica na bandeja do sistema; a tecla PrintScreen (ou o atalho escolhido nas
+  Configurações) seleciona uma área da tela, que pode ser anotada (caneta,
+  setas, retângulos, texto, marca-texto, pixelizar, numeração) e depois
+  copiada, salva em PNG ou enviada por link.
 
 contents:
   - src: target/release/recortei

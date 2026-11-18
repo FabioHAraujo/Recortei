@@ -1,7 +1,8 @@
 //! Linux: captura via xdg-desktop-portal (funciona no Wayland e no X11),
 //! bandeja via StatusNotifierItem (ksni) e instância única via socket abstrato.
-//! A tecla Insert global é um atalho do GNOME que chama `recortei --capture`
-//! (ver install.sh), pois o Wayland não deixa apps capturarem teclas sozinhos.
+//! O atalho global é um atalho personalizado do GNOME que chama
+//! `recortei --capture` (ver gnome.rs), pois o Wayland não deixa apps
+//! capturarem teclas sozinhos.
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -18,6 +19,8 @@ use zbus::zvariant::{OwnedValue, Value};
 
 use crate::app::{UserEvent, APP_ID};
 use crate::draw;
+use crate::gnome;
+use crate::hotkey::{Hotkey, Status};
 
 const PORTAL_DEST: &str = "org.freedesktop.portal.Desktop";
 const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
@@ -157,12 +160,134 @@ impl Capturer {
     }
 }
 
-/// No Linux a tecla global é configurada no ambiente gráfico (install.sh).
-pub fn start_hotkey(_proxy: EventLoopProxy<UserEvent>) {}
+// ---------------------------------------------------------------- atalho global
+#[derive(Debug, PartialEq)]
+enum HotkeyReq {
+    Check(Hotkey),
+    Apply(Hotkey),
+}
+
+/// Thread que fala com o `gsettings` (atalho do GNOME) sem travar a janela;
+/// o resultado chega como `UserEvent::Hotkey`.
+pub struct Hotkeys {
+    tx: mpsc::Sender<HotkeyReq>,
+}
+
+impl Hotkeys {
+    /// O atalho já foi criado pelo `recortei --setup`; nada a registrar aqui.
+    pub fn start(proxy: EventLoopProxy<UserEvent>, _hk: Hotkey) -> Self {
+        let (tx, rx) = mpsc::channel::<HotkeyReq>();
+        std::thread::spawn(move || {
+            while let Ok(mut req) = rx.recv() {
+                // pedidos em sequência (cliques rápidos): só o último importa,
+                // mas uma conferência nunca toma o lugar de uma troca pendente
+                while let Ok(next) = rx.try_recv() {
+                    req = merge(req, next);
+                }
+                let status = match req {
+                    HotkeyReq::Check(hk) => check_gnome(&hk),
+                    HotkeyReq::Apply(hk) => apply_gnome(&hk),
+                };
+                let _ = proxy.send_event(UserEvent::Hotkey(status));
+            }
+        });
+        Hotkeys { tx }
+    }
+
+    /// Troca a tecla do atalho do GNOME (e libera a tecla nos atalhos de
+    /// captura do próprio GNOME, se for o caso).
+    pub fn apply(&self, hk: Hotkey) {
+        let _ = self.tx.send(HotkeyReq::Apply(hk));
+    }
+
+    /// Confere se o atalho do GNOME está com a tecla `hk`.
+    pub fn refresh(&self, hk: Hotkey) {
+        let _ = self.tx.send(HotkeyReq::Check(hk));
+    }
+
+    /// No GNOME o atalho é do sistema; não dá para soltá-lo durante a gravação.
+    pub fn pause(&self) {}
+
+    pub fn resume(&self, _hk: Hotkey) {}
+}
+
+/// Junta dois pedidos seguidos: vale o mais novo, a não ser que ele seja só
+/// uma conferência e o anterior uma troca (o `Apply` já informa a situação).
+fn merge(req: HotkeyReq, next: HotkeyReq) -> HotkeyReq {
+    match (req, next) {
+        (HotkeyReq::Apply(a), HotkeyReq::Check(_)) => HotkeyReq::Apply(a),
+        (_, n) => n,
+    }
+}
+
+fn check_gnome(hk: &Hotkey) -> Status {
+    if !gnome::available() {
+        return Status::Manual;
+    }
+    match gnome::custom_binding() {
+        Some(b) if Hotkey::from_gnome(&b) == Some(*hk) => Status::Active,
+        Some(b) => Status::Error(format!(
+            "O atalho do GNOME está com outra tecla ({b}). Escolha um atalho acima para corrigir."
+        )),
+        None => Status::Error(
+            "O atalho do GNOME ainda não foi criado. Escolha um atalho acima para criá-lo.".into(),
+        ),
+    }
+}
+
+fn apply_gnome(hk: &Hotkey) -> Status {
+    if !gnome::available() {
+        return Status::Manual;
+    }
+    match gnome::bind(Some(hk), None) {
+        Ok(_) => Status::Active,
+        Err(e) => Status::Error(format!("Não foi possível aplicar o atalho no GNOME: {e}.")),
+    }
+}
+
+/// A Ferramenta de Captura do Windows não existe aqui.
+pub fn snipping_tool_owns_print_screen() -> bool {
+    false
+}
+
+pub fn disable_snipping_tool_print_screen() -> Result<(), String> {
+    Err("disponível só no Windows".into())
+}
+
+/// Tema do sistema pelo portal (`org.freedesktop.appearance color-scheme`):
+/// `Some(true)` claro, `Some(false)` escuro, `None` se não deu para saber.
+pub fn prefers_light() -> Option<bool> {
+    let c = Connection::session().ok()?;
+    // ReadOne é do portal ≥ 1.15; o Read antigo devolve a variante dentro de outra
+    let scheme = ["ReadOne", "Read"].iter().find_map(|method| {
+        let reply = c
+            .call_method(
+                Some(PORTAL_DEST),
+                PORTAL_PATH,
+                Some("org.freedesktop.portal.Settings"),
+                *method,
+                &("org.freedesktop.appearance", "color-scheme"),
+            )
+            .ok()?;
+        let v: OwnedValue = reply.body().deserialize().ok()?;
+        variant_u32(&v)
+    })?;
+    // 1 = escuro; 0 (sem preferência) e 2 = claro, como o GNOME/libadwaita
+    Some(scheme != 1)
+}
+
+fn variant_u32(v: &Value) -> Option<u32> {
+    match v {
+        Value::U32(n) => Some(*n),
+        Value::Value(inner) => variant_u32(inner),
+        _ => None,
+    }
+}
 
 // ---------------------------------------------------------------- bandeja
 struct SniTray {
     proxy: EventLoopProxy<UserEvent>,
+    hotkey: String,
 }
 
 impl SniTray {
@@ -197,7 +322,7 @@ impl ksni::Tray for SniTray {
     fn tool_tip(&self) -> ksni::ToolTip {
         ksni::ToolTip {
             title: "Recortei".into(),
-            description: "Insert para capturar uma área da tela".into(),
+            description: super::tooltip(&self.hotkey),
             ..Default::default()
         }
     }
@@ -218,8 +343,11 @@ impl ksni::Tray for SniTray {
             .into()
         };
         vec![
-            item("Capturar área (Insert)", || UserEvent::CaptureDelayed),
+            item(&super::capture_item(&self.hotkey), || {
+                UserEvent::CaptureDelayed
+            }),
             item("Abrir pasta de recortes", || UserEvent::OpenFolder),
+            item("Configurações…", || UserEvent::OpenSettings),
             MenuItem::Separator,
             item("Sair", || UserEvent::Quit),
         ]
@@ -227,14 +355,23 @@ impl ksni::Tray for SniTray {
 }
 
 pub struct Tray {
-    _handle: ksni::blocking::Handle<SniTray>,
+    handle: ksni::blocking::Handle<SniTray>,
 }
 
 impl Tray {
-    pub fn new(proxy: EventLoopProxy<UserEvent>) -> Result<Self, String> {
+    pub fn new(proxy: EventLoopProxy<UserEvent>, hotkey: &str) -> Result<Self, String> {
         use ksni::blocking::TrayMethods;
-        let handle = SniTray { proxy }.spawn().map_err(|e| e.to_string())?;
-        Ok(Tray { _handle: handle })
+        let tray = SniTray {
+            proxy,
+            hotkey: hotkey.into(),
+        };
+        let handle = tray.spawn().map_err(|e| e.to_string())?;
+        Ok(Tray { handle })
+    }
+
+    /// Atualiza os textos quando o atalho muda.
+    pub fn set_hotkey(&self, hotkey: &str) {
+        self.handle.update(|t| t.hotkey = hotkey.into());
     }
 }
 
@@ -323,6 +460,19 @@ pub fn attach_console() {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn check_never_replaces_pending_apply() {
+        let (a, b) = (
+            Hotkey::parse("Insert").unwrap(),
+            Hotkey::parse("Pause").unwrap(),
+        );
+        use HotkeyReq::{Apply, Check};
+        assert_eq!(merge(Apply(a), Check(a)), Apply(a));
+        assert_eq!(merge(Apply(a), Apply(b)), Apply(b));
+        assert_eq!(merge(Check(a), Apply(b)), Apply(b));
+        assert_eq!(merge(Check(a), Check(b)), Check(b));
+    }
 
     #[test]
     fn uri_decoding() {

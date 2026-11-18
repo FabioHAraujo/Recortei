@@ -21,7 +21,7 @@ optdepends=('libx11: sessões X11'
             'libxcursor: cursores em sessões X11'
             'libxi: entrada em sessões X11'
             'libxkbcommon-x11: teclado em sessões X11'
-            'glib2: registrar a tecla Insert no GNOME (recortei --setup)'
+            'glib2: registrar o atalho de captura no GNOME (gsettings)'
             'xdg-utils: abrir a pasta dos recortes'
             'wl-clipboard: área de transferência alternativa no Wayland'
             'xclip: área de transferência alternativa no X11')

@@ -19,9 +19,11 @@ use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
 use winit::window::{CursorIcon, Fullscreen, Window, WindowId, WindowLevel};
 
 use crate::config::{save_dir, uploads_file, Config};
+use crate::hotkey::{self, Hotkey, Recorded, Status};
 use crate::output::{self, Clipboard};
 use crate::overlay::{make_dim_background, to_xrgb, Exit, KeyInput, Mon, Overlay, R};
 use crate::platform;
+use crate::settings::{self, Action, SettingsWindow};
 use crate::upload;
 
 #[cfg_attr(windows, allow(dead_code))]
@@ -34,12 +36,18 @@ fn debug() -> bool {
 }
 
 pub enum UserEvent {
-    /// Tecla Insert / `recortei --capture`.
+    /// Atalho global / `recortei --capture`.
     Capture,
     /// Captura pelo menu da bandeja (espera o menu sumir).
     CaptureDelayed,
     Quit,
     OpenFolder,
+    /// Menu da bandeja "Configurações…" / `recortei --settings`.
+    OpenSettings,
+    /// Situação do atalho global depois de registrar ou conferir.
+    Hotkey(Status),
+    /// Tema do sistema (`true` = claro), detectado numa thread.
+    Theme(bool),
     /// Outra instância foi aberta sem argumentos.
     Hello,
     Warn(String, String),
@@ -66,21 +74,38 @@ struct Session {
     cursor: CursorIcon,
 }
 
+/// O que fazer assim que o app sobe.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Startup {
+    Idle,
+    Capture,
+    Settings,
+}
+
 pub struct App {
     proxy: EventLoopProxy<UserEvent>,
     cfg: Config,
     capturer: platform::Capturer,
     tray: Option<platform::Tray>,
+    hotkeys: Option<platform::Hotkeys>,
+    hotkey_status: Status,
+    /// Já avisou (notificação) que o atalho está ocupado.
+    taken_notified: bool,
+    /// O usuário desativou a Ferramenta de Captura na tecla Print Screen nesta sessão.
+    snipping_fixed: bool,
+    /// Tema do sistema, quando já conhecido (`true` = claro).
+    light: Option<bool>,
     context: Option<Context<OwnedDisplayHandle>>,
     session: Option<Session>,
+    settings: Option<SettingsWindow>,
     busy_since: Option<Instant>,
-    capture_on_start: bool,
+    startup: Startup,
     clipboard: Clipboard,
     wayland: bool,
     started: bool,
 }
 
-pub fn run(server: platform::Server, capture_on_start: bool) -> Result<(), String> {
+pub fn run(server: platform::Server, startup: Startup) -> Result<(), String> {
     let event_loop = EventLoop::<UserEvent>::with_user_event()
         .build()
         .map_err(|e| e.to_string())?;
@@ -90,6 +115,7 @@ pub fn run(server: platform::Server, capture_on_start: bool) -> Result<(), Strin
     server.serve(move |cmd| {
         let ev = match cmd {
             "capture" => UserEvent::Capture,
+            "settings" => UserEvent::OpenSettings,
             "quit" => UserEvent::Quit,
             "" => return,
             _ => UserEvent::Hello,
@@ -103,10 +129,16 @@ pub fn run(server: platform::Server, capture_on_start: bool) -> Result<(), Strin
         proxy,
         cfg: Config::load(),
         tray: None,
+        hotkeys: None,
+        hotkey_status: Status::Pending,
+        taken_notified: false,
+        snipping_fixed: false,
+        light: None,
         context: None,
         session: None,
+        settings: None,
         busy_since: None,
-        capture_on_start,
+        startup,
         clipboard: Clipboard::default(),
         wayland: false,
         started: false,
@@ -129,31 +161,165 @@ impl App {
             Ok(c) => self.context = Some(c),
             Err(e) => eprintln!("Erro iniciando o desenho: {e}"),
         }
-        match platform::Tray::new(self.proxy.clone()) {
+        let hk = self.cfg.hotkey();
+        match platform::Tray::new(self.proxy.clone(), &hk.label()) {
             Ok(t) => self.tray = Some(t),
             Err(e) => {
                 eprintln!("Aviso: sem ícone na bandeja ({e})");
                 let hint = if cfg!(windows) {
-                    "A captura continua funcionando pela tecla Insert."
+                    format!("A captura continua funcionando pelo atalho {hk}.")
                 } else {
-                    "No GNOME, ative a extensão AppIndicator. A captura continua funcionando pela tecla Insert."
+                    format!(
+                        "No GNOME, ative a extensão AppIndicator. A captura continua funcionando pelo atalho {hk}."
+                    )
                 };
                 let _ = self.proxy.send_event(UserEvent::Warn(
                     "Ícone da bandeja indisponível".into(),
-                    hint.into(),
+                    hint,
                 ));
             }
         }
-        platform::start_hotkey(self.proxy.clone());
-        if self.capture_on_start {
-            self.request_capture();
+        // tema do sistema já na abertura, para a primeira janela de
+        // Configurações não piscar no tema errado (no Linux é uma chamada D-Bus)
+        self.query_theme();
+        self.hotkeys = Some(platform::Hotkeys::start(self.proxy.clone(), hk));
+        if hk == hotkey::DEFAULT && platform::snipping_tool_owns_print_screen() {
+            output::notify(
+                "A tecla Print Screen abre a Ferramenta de Captura",
+                "Para o Recortei usar PrintScreen, abra Configurações no ícone da bandeja e clique em “Desativar no Windows”.",
+            );
+        }
+        match self.startup {
+            Startup::Idle => {}
+            Startup::Capture => self.request_capture(),
+            Startup::Settings => self.open_settings(el),
+        }
+    }
+
+    // -- janela de Configurações
+    fn open_settings(&mut self, el: &ActiveEventLoop) {
+        if let Some(w) = &self.settings {
+            return w.focus();
+        }
+        let Some(context) = &self.context else { return };
+        let hk = self.cfg.hotkey();
+        let mut model = settings::Model::new(hk, self.hotkey_status.clone());
+        // no Windows o tema é uma leitura barata do registro
+        let light = self
+            .light
+            .or_else(|| cfg!(windows).then(platform::prefers_light).flatten());
+        model.light = light.unwrap_or(false);
+        model.header = self.wayland;
+        model.gnome = cfg!(target_os = "linux");
+        model.snipping = platform::snipping_tool_owns_print_screen();
+        model.snipping_fixed = self.snipping_fixed;
+        match SettingsWindow::open(el, context, model) {
+            Ok(w) => self.settings = Some(w),
+            Err(e) => {
+                eprintln!("Erro abrindo as Configurações: {e}");
+                return;
+            }
+        }
+        if let Some(h) = &self.hotkeys {
+            h.refresh(hk);
+        }
+        // o tema pode ter mudado desde a última vez
+        self.query_theme();
+    }
+
+    /// Lê o tema do sistema numa thread; o resultado chega como `UserEvent::Theme`.
+    fn query_theme(&self) {
+        let proxy = self.proxy.clone();
+        std::thread::spawn(move || {
+            if let Some(light) = platform::prefers_light() {
+                let _ = proxy.send_event(UserEvent::Theme(light));
+            }
+        });
+    }
+
+    fn settings_action(&mut self, action: Action) {
+        let current = self.cfg.hotkey();
+        match action {
+            Action::Apply(hk) => {
+                self.cfg.set_hotkey(hk);
+                self.hotkey_status = Status::Pending;
+                if let Some(h) = &self.hotkeys {
+                    h.apply(hk);
+                }
+                if let Some(t) = &self.tray {
+                    t.set_hotkey(&hk.label());
+                }
+            }
+            Action::StartRecording => {
+                if let Some(h) = &self.hotkeys {
+                    h.pause();
+                }
+            }
+            Action::StopRecording => {
+                if let Some(h) = &self.hotkeys {
+                    h.resume(current);
+                }
+            }
+            Action::FixSnipping => {
+                let result = platform::disable_snipping_tool_print_screen();
+                if let Some(w) = &mut self.settings {
+                    match result {
+                        Ok(()) => {
+                            self.snipping_fixed = true;
+                            w.set_snipping(false, true);
+                            // tenta pegar a tecla de novo (às vezes só depois de sair e entrar)
+                            if let Some(h) = &self.hotkeys {
+                                h.resume(current);
+                            }
+                        }
+                        Err(e) => w.set_status(Status::Error(format!(
+                            "Não foi possível mudar a opção do Windows: {e}."
+                        ))),
+                    }
+                }
+            }
+            Action::Close => {
+                if let Some(w) = self.settings.take() {
+                    if w.recording() {
+                        if let Some(h) = &self.hotkeys {
+                            h.resume(current);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn on_hotkey_status(&mut self, status: Status) {
+        self.hotkey_status = status.clone();
+        if let Some(w) = &mut self.settings {
+            if w.hotkey() == self.cfg.hotkey() {
+                w.set_status(status);
+            }
+            return;
+        }
+        // a notificação da abertura já falou da Ferramenta de Captura
+        let snipping =
+            self.cfg.hotkey() == hotkey::DEFAULT && platform::snipping_tool_owns_print_screen();
+        if status == Status::Taken && !self.taken_notified && !snipping {
+            self.taken_notified = true;
+            let hk = self.cfg.hotkey();
+            output::notify(
+                &format!("Atalho {hk} indisponível"),
+                &format!(
+                    "Outro programa já usa {hk}. Escolha outro em Configurações (ícone da bandeja)."
+                ),
+            );
         }
     }
 
     fn request_capture(&mut self) {
+        if self.settings.as_ref().is_some_and(|w| w.recording()) {
+            return; // a tecla era para a gravação de um atalho novo
+        }
         if let Some(s) = &mut self.session {
-            // Insert com a sobreposição aberta: confirma (ou só traz para frente)
-            s.ov.insert_pressed();
+            // atalho com a sobreposição aberta: confirma (ou só traz para frente)
+            s.ov.hotkey_pressed();
             if s.ov.exit.is_none() {
                 if let Some(w) = s.wins.first() {
                     w.window.focus_window();
@@ -540,9 +706,20 @@ impl ApplicationHandler<UserEvent> for App {
                 let _ = std::fs::create_dir_all(&dir);
                 platform::open_folder(&dir);
             }
+            UserEvent::OpenSettings => self.open_settings(el),
+            UserEvent::Hotkey(status) => self.on_hotkey_status(status),
+            UserEvent::Theme(light) => {
+                self.light = Some(light);
+                if let Some(w) = &mut self.settings {
+                    w.set_light(light);
+                }
+            }
             UserEvent::Hello => output::notify(
                 "O Recortei já está aberto",
-                "Aperte Insert para capturar uma área da tela.",
+                &format!(
+                    "Aperte {} para capturar uma área da tela.",
+                    self.cfg.hotkey()
+                ),
             ),
             UserEvent::Warn(title, body) => output::notify(&title, &body),
             UserEvent::Uploaded(result, saved) => self.upload_done(result, saved),
@@ -559,6 +736,12 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn window_event(&mut self, _el: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        if let Some(w) = self.settings.as_mut().filter(|w| w.id() == id) {
+            if let Some(action) = w.event(event) {
+                self.settings_action(action);
+            }
+            return;
+        }
         let Some(i) = self.window_index(id) else {
             return;
         };
@@ -611,7 +794,13 @@ impl ApplicationHandler<UserEvent> for App {
                 if event.state != ElementState::Pressed {
                     return;
                 }
+                let hk = self.cfg.hotkey();
                 if let Some(s) = &mut self.session {
+                    // o próprio atalho com a sobreposição em foco (sem atalho global)
+                    if is_hotkey(&event, s.ov.mods, hk) {
+                        s.ov.hotkey_pressed();
+                        return self.after_input();
+                    }
                     let ctrl = s.ov.mods.control_key();
                     // com Ctrl, usa a tecla "pura" (Ctrl+C → 'c' em qualquer layout/plataforma)
                     let logical = if ctrl {
@@ -649,8 +838,17 @@ impl ApplicationHandler<UserEvent> for App {
 
     fn exiting(&mut self, _el: &ActiveEventLoop) {
         self.session = None;
+        self.settings = None;
         self.tray = None;
     }
+}
+
+fn is_hotkey(
+    event: &winit::event::KeyEvent,
+    mods: winit::keyboard::ModifiersState,
+    hk: Hotkey,
+) -> bool {
+    hotkey::record(event.physical_key, &event.logical_key, mods) == Recorded::Hotkey(hk)
 }
 
 /// Acrescenta uma linha em `uploads.jsonl` com o link e os dados para apagar

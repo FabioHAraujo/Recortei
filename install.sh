@@ -8,8 +8,9 @@
 #     target/release/recortei.
 #
 # Copia o binário para ~/.local/bin, instala o ícone e o atalho do menu e roda
-# `recortei --setup`, que configura o início com a sessão, a tecla Insert no
-# GNOME e a permissão do portal de captura de tela.
+# `recortei --setup`, que configura o início com a sessão, o atalho de captura
+# no GNOME (padrão PrintScreen; troque em Configurações, no ícone da bandeja) e
+# a permissão do portal de captura de tela.
 #
 #   ./install.sh               instala (ou atualiza)
 #   ./install.sh --uninstall   remove (seus recortes e configurações ficam)
@@ -38,10 +39,13 @@ has_gnome_keys() {
 
 uninstall() {
   stop_running
-  rm -f "$APP" "$DESKTOP_FILE" "$AUTOSTART_FILE" \
-    "$ICONS/scalable/apps/$APP_ID.svg" "$ICONS/256x256/apps/$APP_ID.png"
-  if has_gnome_keys; then
-    # Tira o atalho Insert da lista de atalhos personalizados do GNOME.
+  # O próprio app desfaz o --setup: tira o atalho do GNOME e devolve os atalhos
+  # de captura do GNOME (Print) que ele tinha liberado. Binários antigos sem
+  # --unsetup caem no caminho manual abaixo.
+  if [ -x "$APP" ] && [[ "$("$APP" --help 2>/dev/null || true)" == *--unsetup* ]]; then
+    "$APP" --unsetup || echo ">> Aviso: o 'recortei --unsetup' não conseguiu desfazer tudo (veja as mensagens acima)."
+  elif has_gnome_keys; then
+    # Tira o atalho do Recortei da lista de atalhos personalizados do GNOME.
     CUR=$(gsettings get "$MEDIA_KEYS" custom-keybindings)
     if [[ "$CUR" == *"'$KB'"* ]]; then
       NEW=$(printf '%s' "$CUR" | sed -e "s#'$KB'##" -e 's/\[, /[/' -e 's/, ,/,/' -e 's/, \]/]/')
@@ -52,6 +56,8 @@ uninstall() {
       gsettings reset "$MEDIA_KEYS.custom-keybinding:$KB" "$key" 2>/dev/null || true
     done
   fi
+  rm -f "$APP" "$DESKTOP_FILE" "$AUTOSTART_FILE" \
+    "$ICONS/scalable/apps/$APP_ID.svg" "$ICONS/256x256/apps/$APP_ID.png"
   echo ">> Recortei removido. Seus recortes (Imagens/Recortei) e configurações foram mantidos."
 }
 
@@ -116,13 +122,13 @@ StartupNotify=false
 EOF
 command -v update-desktop-database >/dev/null && update-desktop-database -q "$(dirname "$DESKTOP_FILE")" 2>/dev/null || true
 
-# Início com a sessão, tecla Insert no GNOME e permissão do portal: tudo fica
-# no `recortei --setup`, o mesmo que roda sozinho na primeira execução.
+# Início com a sessão, atalho de captura no GNOME e permissão do portal: tudo
+# fica no `recortei --setup`, o mesmo que roda sozinho na primeira execução.
 HELP_TEXT="$("$APP" --help 2>/dev/null || true)"
 if [[ "$HELP_TEXT" == *--setup* ]]; then
   "$APP" --setup || echo ">> Aviso: o 'recortei --setup' não conseguiu configurar tudo (veja as mensagens acima)."
 else
-  echo ">> Aviso: este binário não tem 'recortei --setup'; configure um atalho Insert para: $APP --capture"
+  echo ">> Aviso: este binário não tem 'recortei --setup'; configure um atalho global (ex.: PrintScreen) para: $APP --capture"
 fi
 
 case ":$PATH:" in
@@ -131,7 +137,7 @@ case ":$PATH:" in
 esac
 
 if [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]; then
-  echo ">> Recortei instalado em $APP. Iniciando..."
+  echo ">> Recortei instalado em $APP. Iniciando... (para trocar o atalho: ícone da bandeja → Configurações, ou $APP --settings)"
   nohup "$APP" >/dev/null 2>&1 &
 else
   echo ">> Recortei instalado em $APP. Ele inicia sozinho no próximo login (ou rode: $APP)."

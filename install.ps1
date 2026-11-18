@@ -63,5 +63,5 @@ foreach ($lnk in @($Startup, $Menu)) {
     $s.Save()
 }
 
-Write-Host ">> Pronto. Iniciando o Recortei (ícone na bandeja; tecla Insert captura)..."
+Write-Host ">> Pronto. Iniciando o Recortei (ícone na bandeja; o atalho configurado captura, padrão PrintScreen)..."
 Start-Process $App

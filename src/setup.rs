@@ -1,19 +1,29 @@
-//! `recortei --setup`: configuração por usuário que antes só o install.sh fazia.
+//! `recortei --setup` / `--unsetup`: configuração por usuário que antes só o
+//! install.sh fazia.
 //!
-//! No Linux: entrada de início automático (`~/.config/autostart`), atalho
-//! Insert do GNOME chamando `<este executável> --capture` e permissão do
-//! portal de screenshot. Pode rodar quantas vezes quiser (idempotente) e roda
-//! sozinho uma vez na primeira abertura (chave `linux_setup_done` do
-//! config.json), para quem instala pelo .deb/.rpm/Arch ganhar a tecla Insert
-//! sem precisar rodar nada. No Windows não há nada a configurar.
+//! No Linux: entrada de início automático (`~/.config/autostart`), atalho de
+//! captura do GNOME (padrão PrintScreen) chamando `<este executável> --capture`
+//! e permissão do portal de screenshot. Pode rodar quantas vezes quiser
+//! (idempotente) e roda sozinho uma vez na primeira abertura (chave
+//! `linux_setup_done` do config.json), para quem instala pelo .deb/.rpm/Arch
+//! ganhar o atalho sem precisar rodar nada. No Windows não há nada a configurar.
 
 /// Executa `recortei --setup` e devolve o código de saída do processo.
 #[cfg(windows)]
 pub fn run() -> i32 {
     crate::platform::attach_console();
+    let hk = crate::config::Config::load().hotkey();
     println!(
-        "No Windows não há nada a configurar: a tecla Insert já é global e o instalador cuida do início automático."
+        "No Windows não há nada a configurar: o atalho ({hk}) já é global e o instalador cuida do início automático."
     );
+    0
+}
+
+/// Executa `recortei --unsetup` e devolve o código de saída do processo.
+#[cfg(windows)]
+pub fn unsetup() -> i32 {
+    crate::platform::attach_console();
+    println!("No Windows não há nada a desfazer: o desinstalador remove o início automático.");
     0
 }
 
@@ -22,26 +32,23 @@ pub fn run() -> i32 {
 pub fn first_run() {}
 
 #[cfg(target_os = "linux")]
-pub use self::linux::{first_run, run};
+pub use self::linux::{first_run, run, unsetup};
 
 #[cfg(target_os = "linux")]
 mod linux {
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
     use std::process::Command;
 
     use crate::app::APP_ID;
     use crate::config::Config;
-
-    const MEDIA_KEYS: &str = "org.gnome.settings-daemon.plugins.media-keys";
-    const KEYBINDING_PATH: &str =
-        "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/recortei/";
+    use crate::gnome;
+    use crate::hotkey::Hotkey;
 
     /// Executa `recortei --setup` e devolve o código de saída do processo.
     pub fn run() -> i32 {
         let ok = setup();
         if ok {
-            let mut cfg = Config::load();
-            cfg.set_linux_setup_done();
+            Config::load().set_linux_setup_done(true);
             println!(">> Pronto.");
             0
         } else {
@@ -54,22 +61,61 @@ mod linux {
     /// apontar o atalho e o início automático para o binário de desenvolvimento.
     pub fn first_run() {
         let mut cfg = Config::load();
+        gnome::adopt_binding(&mut cfg);
         if cfg.linux_setup_done() {
             return;
         }
-        if current_exe().is_some_and(|exe| inside_cargo_target(&exe)) {
+        if gnome::current_exe().is_some_and(|exe| inside_cargo_target(&exe)) {
             return;
         }
         println!(">> Primeira execução: configurando o Recortei (recortei --setup)...");
         setup();
         // Mesmo com algum passo falhando, não insiste a cada abertura: o
         // usuário pode rodar `recortei --setup` depois.
-        cfg.set_linux_setup_done();
+        cfg.set_linux_setup_done(true);
+    }
+
+    /// Executa `recortei --unsetup`: tira o início automático e o atalho do
+    /// GNOME e devolve os atalhos de captura do GNOME (para desinstalar).
+    pub fn unsetup() -> i32 {
+        let mut ok = true;
+        if let Some(dir) = dirs::config_dir() {
+            let file = dir.join("autostart").join(format!("{APP_ID}.desktop"));
+            match std::fs::remove_file(&file) {
+                Ok(()) => println!(">> Início automático removido ({}).", file.display()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    eprintln!(">> Erro removendo {}: {e}", file.display());
+                    ok = false;
+                }
+            }
+        }
+        // só os esquemas: desfaz o que o Recortei gravou mesmo fora do GNOME
+        if gnome::installed() {
+            match gnome::unbind() {
+                Ok(true) => println!(
+                    ">> Atalho do GNOME removido; atalhos de captura do GNOME restaurados."
+                ),
+                Ok(false) => {}
+                Err(e) => {
+                    eprintln!(">> Erro removendo o atalho do GNOME: {e}");
+                    ok = false;
+                }
+            }
+        }
+        if ok {
+            // a próxima abertura do app configura tudo de novo
+            Config::load().set_linux_setup_done(false);
+            println!(">> Pronto. Configuração do Recortei desfeita para este usuário.");
+            0
+        } else {
+            1
+        }
     }
 
     /// Faz todos os passos; `false` se algum essencial falhou.
     fn setup() -> bool {
-        let Some(exe) = current_exe() else {
+        let Some(exe) = gnome::current_exe() else {
             eprintln!(">> Erro: não foi possível descobrir o caminho do executável.");
             return false;
         };
@@ -79,14 +125,6 @@ mod linux {
         portal_permission();
         appindicator_hint();
         ok
-    }
-
-    /// Caminho do executável atual (sem o " (deleted)" que o Linux acrescenta
-    /// quando o binário foi substituído enquanto rodava).
-    fn current_exe() -> Option<PathBuf> {
-        let exe = std::env::current_exe().ok()?;
-        let s = exe.to_str()?;
-        Some(PathBuf::from(s.strip_suffix(" (deleted)").unwrap_or(s)))
     }
 
     /// O binário está dentro de uma pasta `target/` do cargo?
@@ -147,88 +185,44 @@ mod linux {
         }
     }
 
-    // ------------------------------------------------------------ atalho Insert do GNOME
-    fn gsettings(args: &[&str]) -> Option<String> {
-        let out = Command::new("gsettings").args(args).output().ok()?;
-        out.status
-            .success()
-            .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
-    }
-
-    /// Atalho global Insert: o Wayland não permite o app capturar teclas
+    // ------------------------------------------------------------ atalho do GNOME
+    /// Atalho global de captura: o Wayland não permite o app capturar teclas
     /// sozinho, então registramos um atalho personalizado do GNOME que chama
-    /// o app (os mesmos comandos `gsettings` do install.sh).
+    /// o app. Não sobrescreve a tecla que o usuário escolheu nas
+    /// Configurações do GNOME (ela é adotada no config.json).
     fn gnome_shortcut(exe: &Path) -> bool {
-        let exe = exe.to_string_lossy();
-        let command = format!("{} --capture", shell_quote(&exe));
-        let has_schema =
-            gsettings(&["list-schemas"]).is_some_and(|s| s.lines().any(|l| l.trim() == MEDIA_KEYS));
-        if !has_schema {
-            println!(">> GNOME não encontrado: configure no seu ambiente um atalho Insert para: {command}");
+        let mut cfg = Config::load();
+        let command = format!("{} --capture", gnome::shell_quote(&exe.to_string_lossy()));
+        if !gnome::available() {
+            println!(
+                ">> GNOME não encontrado: crie no seu ambiente um atalho global {} para: {command}",
+                cfg.hotkey()
+            );
             return true;
         }
-        let Some(current) = gsettings(&["get", MEDIA_KEYS, "custom-keybindings"]) else {
-            eprintln!(">> Erro: não foi possível ler os atalhos personalizados do GNOME.");
-            return false;
-        };
-        let list = add_keybinding(&current, KEYBINDING_PATH);
-        let schema = format!("{MEDIA_KEYS}.custom-keybinding:{KEYBINDING_PATH}");
-        // Não sobrescreve a tecla que o usuário escolheu nas Configurações:
-        // só grava Insert quando o atalho é novo ou está sem tecla.
-        let kept = match (&list, gsettings(&["get", &schema, "binding"])) {
-            (None, Some(b)) => Some(gvariant_unquote(&b)).filter(|b| !b.is_empty()),
-            _ => None,
-        };
-        // Nome e comando sempre: o caminho do executável pode ter mudado.
-        let gsd = gsd_command(&exe);
-        let mut keys = vec![("name", "Recortei"), ("command", gsd.as_str())];
-        if kept.is_none() {
-            keys.push(("binding", "Insert"));
-        }
-        let mut ok = keys
-            .iter()
-            .all(|(key, value)| gsettings(&["set", &schema, key, &gvariant_str(value)]).is_some());
-        // A lista só ganha o atalho depois que ele está completo.
-        if let (true, Some(list)) = (ok, &list) {
-            ok = gsettings(&["set", MEDIA_KEYS, "custom-keybindings", list]).is_some();
-        }
-        match (ok, kept) {
-            (true, Some(key)) => {
-                println!(">> Atalho do GNOME já existe; tecla mantida ({key}) → {command}")
+        gnome::adopt_binding(&mut cfg);
+        // tecla que o Recortei não representa (ex.: <Super>space): fica como está
+        let kept = gnome::custom_binding().filter(|b| Hotkey::from_gnome(b).is_none());
+        let hk = cfg.hotkey();
+        match gnome::bind(kept.is_none().then_some(&hk), Some(exe)) {
+            Ok(bound) => {
+                let key = kept.clone().unwrap_or_else(|| hk.label());
+                println!(">> Atalho do GNOME: {key} → {command}");
+                for (k, list) in bound.screenshot_changes {
+                    println!(
+                        ">> Atalho de captura do GNOME '{k}' agora: {list:?} (o original volta se você trocar de tecla ou rodar recortei --unsetup)"
+                    );
+                }
+                if kept.is_none() && !cfg.has_hotkey() {
+                    cfg.set_hotkey(hk);
+                }
+                true
             }
-            (true, None) => println!(">> Atalho do GNOME: Insert → {command}"),
-            (false, _) => {
-                eprintln!(">> Erro: não foi possível registrar o atalho Insert no GNOME.")
+            Err(e) => {
+                eprintln!(">> Erro: não foi possível registrar o atalho {hk} no GNOME ({e}).");
+                false
             }
         }
-        ok
-    }
-
-    /// Comando do atalho como o gnome-settings-daemon espera: ele interpreta
-    /// `%` como código de campo do `Exec` (.desktop), então `%` vira `%%`.
-    fn gsd_command(exe: &str) -> String {
-        format!("{} --capture", shell_quote(exe)).replace('%', "%%")
-    }
-
-    /// Acrescenta `path` à lista `custom-keybindings` (texto do `gsettings get`);
-    /// `None` se já estiver lá.
-    fn add_keybinding(current: &str, path: &str) -> Option<String> {
-        let quoted = gvariant_str(path);
-        if current.contains(&quoted) {
-            return None;
-        }
-        let current = current.trim();
-        let inner = current.strip_prefix("@as").unwrap_or(current).trim();
-        let inner = inner
-            .strip_prefix('[')
-            .and_then(|s| s.strip_suffix(']'))
-            .unwrap_or("")
-            .trim();
-        Some(if inner.is_empty() {
-            format!("[{quoted}]")
-        } else {
-            format!("[{inner}, {quoted}]")
-        })
     }
 
     // ------------------------------------------------------------ permissão do portal
@@ -277,33 +271,6 @@ mod linux {
     }
 
     // ------------------------------------------------------------ aspas
-    /// String no formato de texto do GVariant (`'...'`), como o `gsettings` espera.
-    fn gvariant_str(s: &str) -> String {
-        format!("'{}'", s.replace('\\', "\\\\").replace('\'', "\\'"))
-    }
-
-    /// Desfaz [`gvariant_str`] na saída do `gsettings get` (`'Insert'` → `Insert`).
-    fn gvariant_unquote(s: &str) -> String {
-        let s = s.trim();
-        let inner = ['\'', '"']
-            .iter()
-            .find_map(|&q| s.strip_prefix(q).and_then(|s| s.strip_suffix(q)))
-            .unwrap_or(s);
-        inner.replace("\\'", "'").replace("\\\\", "\\")
-    }
-
-    /// Argumento para um comando que o GNOME divide como o shell.
-    fn shell_quote(s: &str) -> String {
-        if !s.is_empty()
-            && s.chars()
-                .all(|c| c.is_ascii_alphanumeric() || "/._+-=:,@%".contains(c))
-        {
-            s.to_string()
-        } else {
-            format!("'{}'", s.replace('\'', "'\\''"))
-        }
-    }
-
     /// Argumento da chave `Exec` de um arquivo .desktop (especificação
     /// freedesktop: aspas duplas quando há caracteres reservados, `%` dobrado
     /// e barras invertidas escapadas de novo pela regra de strings).
@@ -331,26 +298,7 @@ mod linux {
         use super::*;
 
         #[test]
-        fn keybinding_list() {
-            let kb = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/recortei/";
-            assert_eq!(add_keybinding("@as []", kb).unwrap(), format!("['{kb}']"));
-            assert_eq!(add_keybinding("[]", kb).unwrap(), format!("['{kb}']"));
-            assert_eq!(
-                add_keybinding("['/a/custom0/']", kb).unwrap(),
-                format!("['/a/custom0/', '{kb}']")
-            );
-            assert!(add_keybinding(&format!("['/a/custom0/', '{kb}']"), kb).is_none());
-        }
-
-        #[test]
         fn quoting() {
-            assert_eq!(gvariant_str("it's"), r"'it\'s'");
-            assert_eq!(shell_quote("/usr/bin/recortei"), "/usr/bin/recortei");
-            assert_eq!(
-                shell_quote("/home/x/Meus Apps/recortei"),
-                "'/home/x/Meus Apps/recortei'"
-            );
-            assert_eq!(shell_quote("/a/it's"), r"'/a/it'\''s'");
             assert_eq!(desktop_exec_arg("/usr/bin/recortei"), "/usr/bin/recortei");
             assert_eq!(
                 desktop_exec_arg("/home/x/Meus Apps/recortei"),
@@ -358,19 +306,6 @@ mod linux {
             );
             assert_eq!(desktop_exec_arg("/a/100%/b"), "/a/100%%/b");
             assert_eq!(desktop_exec_arg("/a/$b"), r#""/a/\\$b""#);
-            assert_eq!(
-                gsd_command("/usr/bin/recortei"),
-                "/usr/bin/recortei --capture"
-            );
-            assert_eq!(gsd_command("/a/100%/rec"), "/a/100%%/rec --capture");
-            assert_eq!(
-                gsd_command("/home/x/Meus 100%/rec"),
-                "'/home/x/Meus 100%%/rec' --capture"
-            );
-            assert_eq!(gvariant_unquote("'Insert'"), "Insert");
-            assert_eq!(gvariant_unquote("'<Super>Print'"), "<Super>Print");
-            assert_eq!(gvariant_unquote("''"), "");
-            assert_eq!(gvariant_unquote(&gvariant_str("it's")), "it's");
         }
 
         #[test]

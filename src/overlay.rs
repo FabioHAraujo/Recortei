@@ -1379,7 +1379,7 @@ impl Overlay {
         );
         if named == Some(NamedKey::Escape) {
             self.close();
-        } else if enter || named == Some(NamedKey::Insert) || (ctrl && k.ch == Some('c')) {
+        } else if enter || (ctrl && k.ch == Some('c')) {
             self.confirm();
         } else if ctrl && k.ch == Some('u') {
             self.upload();
@@ -1425,12 +1425,10 @@ impl Overlay {
         }
     }
 
-    /// Pedido de captura enquanto a sobreposição já está aberta (tecla Insert global).
-    pub fn insert_pressed(&mut self) {
-        self.key(&KeyInput {
-            named: Some(NamedKey::Insert),
-            ..Default::default()
-        });
+    /// Pedido de captura enquanto a sobreposição já está aberta (atalho
+    /// global): confirma como Enter, inclusive no meio de um texto.
+    pub fn hotkey_pressed(&mut self) {
+        self.confirm();
     }
 }
 
@@ -1909,12 +1907,18 @@ mod tests {
     }
 
     #[test]
-    fn insert_confirms_only_with_selection() {
+    fn hotkey_confirms_only_with_selection() {
         let mut o = overlay(400, 300);
-        o.insert_pressed();
+        o.hotkey_pressed();
         assert!(o.exit.is_none());
         drag(&mut o, (10.0, 10.0), (100.0, 100.0));
-        o.insert_pressed();
+        // Insert era o atalho antigo; agora é uma tecla qualquer na sobreposição
+        o.key(&KeyInput {
+            named: Some(NamedKey::Insert),
+            ..Default::default()
+        });
+        assert!(o.exit.is_none(), "Insert não confirma");
+        o.hotkey_pressed();
         assert_eq!(o.exit, Some(Exit::Confirm));
     }
 }
