@@ -288,6 +288,8 @@ fn variant_u32(v: &Value) -> Option<u32> {
 struct SniTray {
     proxy: EventLoopProxy<UserEvent>,
     hotkey: String,
+    /// "Reiniciar para atualizar (x.y.z)", quando há versão nova.
+    update: Option<String>,
 }
 
 impl SniTray {
@@ -342,7 +344,12 @@ impl ksni::Tray for SniTray {
             }
             .into()
         };
-        vec![
+        let mut menu = Vec::new();
+        if let Some(label) = &self.update {
+            menu.push(item(label, || UserEvent::Restart));
+            menu.push(MenuItem::Separator);
+        }
+        menu.extend([
             item(&super::capture_item(&self.hotkey), || {
                 UserEvent::CaptureDelayed
             }),
@@ -350,7 +357,8 @@ impl ksni::Tray for SniTray {
             item("Configurações…", || UserEvent::OpenSettings),
             MenuItem::Separator,
             item("Sair", || UserEvent::Quit),
-        ]
+        ]);
+        menu
     }
 }
 
@@ -364,6 +372,7 @@ impl Tray {
         let tray = SniTray {
             proxy,
             hotkey: hotkey.into(),
+            update: None,
         };
         let handle = tray.spawn().map_err(|e| e.to_string())?;
         Ok(Tray { handle })
@@ -372,6 +381,11 @@ impl Tray {
     /// Atualiza os textos quando o atalho muda.
     pub fn set_hotkey(&self, hotkey: &str) {
         self.handle.update(|t| t.hotkey = hotkey.into());
+    }
+
+    /// Põe "Reiniciar para atualizar" no topo do menu.
+    pub fn set_update(&mut self, label: &str) {
+        self.handle.update(|t| t.update = Some(label.into()));
     }
 }
 
@@ -456,6 +470,28 @@ impl Server {
 }
 
 pub fn attach_console() {}
+
+// ---------------------------------------------------------------- atualização
+/// Espera o processo `pid` terminar (no máximo `timeout`); um zumbi já terminou.
+pub fn wait_exit(pid: u32, timeout: Duration) {
+    let stat = format!("/proc/{pid}/stat");
+    let deadline = std::time::Instant::now() + timeout;
+    while std::time::Instant::now() < deadline {
+        let running = std::fs::read_to_string(&stat).is_ok_and(|s| {
+            // "pid (nome) estado ...": o nome pode ter espaços e parênteses
+            s.rsplit_once(')')
+                .and_then(|(_, rest)| rest.split_whitespace().next())
+                .is_some_and(|state| state != "Z" && state != "X")
+        });
+        if !running {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// Só o instalador do Windows guarda a versão instalada.
+pub fn set_installed_version(_dir: &Path, _version: &str) {}
 
 #[cfg(test)]
 mod tests {

@@ -54,6 +54,12 @@ pub enum UserEvent {
     Shot(Result<Pixmap, String>),
     /// Fim do envio para a nuvem: link (ou erro) e onde a cópia local foi salva.
     Uploaded(Result<String, String>, Result<std::path::PathBuf, String>),
+    /// Versão nova já baixada, conferida e trocada no disco (versão, executável).
+    UpdateReady(String, std::path::PathBuf),
+    /// Versão nova que esta instalação não aplica sozinha (pacote do sistema).
+    UpdateAvailable(String),
+    /// Menu da bandeja "Reiniciar para atualizar".
+    Restart,
 }
 
 /// Uma janela de sobreposição, cobrindo um monitor.
@@ -103,6 +109,8 @@ pub struct App {
     clipboard: Clipboard,
     wayland: bool,
     started: bool,
+    /// Executável já atualizado, aberto pelo "Reiniciar para atualizar".
+    update_exe: Option<std::path::PathBuf>,
 }
 
 pub fn run(server: platform::Server, startup: Startup) -> Result<(), String> {
@@ -142,6 +150,7 @@ pub fn run(server: platform::Server, startup: Startup) -> Result<(), String> {
         clipboard: Clipboard::default(),
         wayland: false,
         started: false,
+        update_exe: None,
     };
     event_loop.run_app(&mut app).map_err(|e| e.to_string())
 }
@@ -183,6 +192,7 @@ impl App {
         // Configurações não piscar no tema errado (no Linux é uma chamada D-Bus)
         self.query_theme();
         self.hotkeys = Some(platform::Hotkeys::start(self.proxy.clone(), hk));
+        crate::update::start(self.proxy.clone());
         if hk == hotkey::DEFAULT && platform::snipping_tool_owns_print_screen() {
             output::notify(
                 "A tecla Print Screen abre a Ferramenta de Captura",
@@ -723,6 +733,37 @@ impl ApplicationHandler<UserEvent> for App {
             ),
             UserEvent::Warn(title, body) => output::notify(&title, &body),
             UserEvent::Uploaded(result, saved) => self.upload_done(result, saved),
+            UserEvent::UpdateReady(version, exe) => {
+                self.update_exe = Some(exe);
+                if let Some(t) = &mut self.tray {
+                    t.set_update(&format!("Reiniciar para atualizar ({version})"));
+                }
+                output::notify(
+                    "Atualização do Recortei pronta",
+                    &format!(
+                        "A versão {version} já foi baixada e entra quando o Recortei reiniciar.                          Para reiniciar agora, use “Reiniciar para atualizar” no ícone da bandeja."
+                    ),
+                );
+            }
+            UserEvent::UpdateAvailable(version) => output::notify(
+                &format!("Recortei {version} disponível"),
+                &if cfg!(target_os = "linux") {
+                    format!(
+                        "Atualize pelo gerenciador de pacotes do sistema ou baixe em {}.",
+                        crate::update::RELEASES_URL
+                    )
+                } else {
+                    format!("Baixe a versão nova em {}.", crate::update::RELEASES_URL)
+                },
+            ),
+            UserEvent::Restart => {
+                if let Some(exe) = &self.update_exe {
+                    match crate::update::relaunch(exe) {
+                        Ok(()) => el.exit(),
+                        Err(e) => output::notify("Falha ao reiniciar o Recortei", &e),
+                    }
+                }
+            }
             UserEvent::Shot(result) => {
                 self.busy_since = None;
                 match result {

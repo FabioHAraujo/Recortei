@@ -24,11 +24,13 @@ use windows_sys::Win32::System::Pipes::{
     PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
 };
 use windows_sys::Win32::System::Registry::{
-    RegGetValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_DWORD, RRF_RT_REG_DWORD,
+    RegGetValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_DWORD, REG_SZ, RRF_RT_REG_DWORD,
+    RRF_RT_REG_SZ,
 };
 use windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows_sys::Win32::System::Threading::{
-    CreateMutexW, GetCurrentProcessId, GetCurrentThreadId,
+    CreateMutexW, GetCurrentProcessId, GetCurrentThreadId, OpenProcess, WaitForSingleObject,
+    PROCESS_SYNCHRONIZE,
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     RegisterHotKey, UnregisterHotKey, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MOD_WIN,
@@ -279,7 +281,13 @@ pub fn disable_snipping_tool_print_screen() -> Result<(), String> {
 // ---------------------------------------------------------------- bandeja
 pub struct Tray {
     icon: tray_icon::TrayIcon,
+    menu: tray_icon::menu::Menu,
     capture: tray_icon::menu::MenuItem,
+    /// "Reiniciar para atualizar" e o separador, quando há versão nova.
+    update: Option<(
+        tray_icon::menu::MenuItem,
+        tray_icon::menu::PredefinedMenuItem,
+    )>,
 }
 
 impl Tray {
@@ -307,6 +315,7 @@ impl Tray {
                 "capture" => UserEvent::CaptureDelayed,
                 "folder" => UserEvent::OpenFolder,
                 "settings" => UserEvent::OpenSettings,
+                "update" => UserEvent::Restart,
                 "quit" => UserEvent::Quit,
                 _ => return,
             };
@@ -335,14 +344,30 @@ impl Tray {
             .with_id("recortei")
             .with_icon(icon)
             .with_tooltip(format!("Recortei — {}", super::tooltip(hotkey)))
-            .with_menu(Box::new(menu))
+            .with_menu(Box::new(menu.clone()))
             .with_menu_on_left_click(false)
             .build()
             .map_err(|e| e.to_string())?;
         Ok(Tray {
             icon: tray,
+            menu,
             capture,
+            update: None,
         })
+    }
+
+    /// Põe "Reiniciar para atualizar" no topo do menu.
+    pub fn set_update(&mut self, label: &str) {
+        use tray_icon::menu::{MenuItem, PredefinedMenuItem};
+        if let Some((item, _)) = &self.update {
+            item.set_text(label);
+            return;
+        }
+        let item = MenuItem::with_id("update", label, true, None);
+        let sep = PredefinedMenuItem::separator();
+        if self.menu.insert_items(&[&item, &sep], 0).is_ok() {
+            self.update = Some((item, sep));
+        }
     }
 
     /// Atualiza os textos quando o atalho muda.
@@ -467,6 +492,86 @@ impl Server {
             }
         });
     }
+}
+
+// ---------------------------------------------------------------- atualização
+/// Espera o processo `pid` terminar (no máximo `timeout`).
+pub fn wait_exit(pid: u32, timeout: Duration) {
+    unsafe {
+        let h = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
+        if h.is_null() {
+            return; // já terminou
+        }
+        WaitForSingleObject(h, timeout.as_millis().min(u32::MAX as u128) as u32);
+        CloseHandle(h);
+    }
+}
+
+/// Entrada do desinstalador criada pelo instalador (AppId do recortei.iss).
+const UNINSTALL_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{E2A776E0-CF17-4FE6-B7E8-B8A953B0FFF4}_is1";
+
+/// Depois de uma atualização automática, mostra a versão nova em
+/// Configurações → Aplicativos (se o Recortei foi instalado nesta pasta).
+pub fn set_installed_version(dir: &Path, version: &str) {
+    let Some(location) = read_string(UNINSTALL_KEY, "InstallLocation") else {
+        return;
+    };
+    let norm = |s: &str| {
+        s.trim_start_matches(r"\\?\")
+            .trim_end_matches(['\\', '/'])
+            .to_lowercase()
+    };
+    if norm(&location) != norm(&dir.to_string_lossy()) {
+        return;
+    }
+    let (key, value, data) = (wide(UNINSTALL_KEY), wide("DisplayVersion"), wide(version));
+    unsafe {
+        RegSetKeyValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            value.as_ptr(),
+            REG_SZ,
+            data.as_ptr() as *const c_void,
+            (data.len() * 2) as u32,
+        );
+    }
+}
+
+/// REG_SZ de `HKEY_CURRENT_USER\<key>`.
+fn read_string(key: &str, value: &str) -> Option<String> {
+    let (key, value) = (wide(key), wide(value));
+    let mut size = 0u32;
+    let rc = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            value.as_ptr(),
+            RRF_RT_REG_SZ,
+            null_mut(),
+            null_mut(),
+            &mut size,
+        )
+    };
+    if rc != 0 || size == 0 {
+        return None;
+    }
+    let mut buf = vec![0u16; (size as usize).div_ceil(2)];
+    let rc = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            value.as_ptr(),
+            RRF_RT_REG_SZ,
+            null_mut(),
+            buf.as_mut_ptr() as *mut c_void,
+            &mut size,
+        )
+    };
+    if rc != 0 {
+        return None;
+    }
+    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    Some(String::from_utf16_lossy(&buf[..len]))
 }
 
 /// Mostra a saída no terminal quando o exe (subsistema "windows") é chamado de um console.

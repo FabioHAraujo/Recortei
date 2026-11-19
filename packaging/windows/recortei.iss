@@ -6,12 +6,12 @@
 ; Aceita /VERYSILENT /SUPPRESSMSGBOXES para instalar e desinstalar sem janelas.
 ;
 ; Compilação (da raiz do repositório, depois do `cargo build --release`):
-;   iscc /DAppVersion=0.1.0 packaging\windows\recortei.iss
+;   iscc /DAppVersion=0.1.1 packaging\windows\recortei.iss
 ; Gera dist\Recortei-Setup-x86_64.exe. BinDir e OutputDir podem ser trocados
 ; com /DBinDir=... e /DOutputDir=... (caminhos relativos a esta pasta).
 
 #ifndef AppVersion
-  #define AppVersion "0.1.0"
+  #define AppVersion "0.1.1"
 #endif
 #ifndef BinDir
   #define BinDir "..\..\target\release"

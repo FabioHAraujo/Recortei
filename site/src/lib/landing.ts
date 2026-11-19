@@ -3,7 +3,7 @@
 export const repo = "https://github.com/FabioHAraujo/Recortei";
 export const releases = `${repo}/releases`;
 export const license = `${repo}/blob/main/LICENSE`;
-export const version = "0.1.0";
+export const version = "0.1.1";
 // Arquivos anexados à release pelo workflow de release. Os nomes sem versão sempre apontam para a
 // última release; o pacote do Arch leva a versão no nome, então o link aponta para a tag.
 const latest = `${releases}/latest/download`;
@@ -70,7 +70,7 @@ export const messages = {
 		menuTitle: "Navegação",
 		github: "GitHub",
 		introduction: "Apresentação",
-		eyebrow: "Open source · GPL-3.0 · v0.1.0",
+		eyebrow: "Open source · GPL-3.0 · v0.1.1",
 		headline: "Aperte PrintScreen. Recorte, anote e",
 		headlineWord: "compartilhe.",
 		leadBefore: "Sem",
@@ -203,7 +203,7 @@ export const messages = {
 		menuTitle: "Navigation",
 		github: "GitHub",
 		introduction: "Introduction",
-		eyebrow: "Open source · GPL-3.0 · v0.1.0",
+		eyebrow: "Open source · GPL-3.0 · v0.1.1",
 		headline: "Press PrintScreen. Crop, annotate and",
 		headlineWord: "share.",
 		leadBefore: "No",

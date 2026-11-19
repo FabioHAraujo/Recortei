@@ -41,7 +41,7 @@ Baixe a versão mais recente para o seu sistema. Todos os arquivos estão na [p�
 | | [`recortei-windows-x86_64.zip`](https://github.com/FabioHAraujo/Recortei/releases/latest/download/recortei-windows-x86_64.zip) | Versão portátil, sem instalar |
 | **Debian, Ubuntu, Mint…** | [`recortei-linux-amd64.deb`](https://github.com/FabioHAraujo/Recortei/releases/latest/download/recortei-linux-amd64.deb) | Pacote `.deb` |
 | **Fedora, openSUSE…** | [`recortei-linux-x86_64.rpm`](https://github.com/FabioHAraujo/Recortei/releases/latest/download/recortei-linux-x86_64.rpm) | Pacote `.rpm` |
-| **Arch, Manjaro, EndeavourOS…** | [`recortei-0.1.0-1-x86_64.pkg.tar.zst`](https://github.com/FabioHAraujo/Recortei/releases/download/v0.1.0/recortei-0.1.0-1-x86_64.pkg.tar.zst) | Pacote do `pacman` |
+| **Arch, Manjaro, EndeavourOS…** | [`recortei-0.1.1-1-x86_64.pkg.tar.zst`](https://github.com/FabioHAraujo/Recortei/releases/download/v0.1.1/recortei-0.1.1-1-x86_64.pkg.tar.zst) | Pacote do `pacman` |
 | **Outras distros** (x86_64) | [`recortei-linux-x86_64.tar.gz`](https://github.com/FabioHAraujo/Recortei/releases/latest/download/recortei-linux-x86_64.tar.gz) | Binário + `install.sh` para o seu usuário |
 
 Para conferir um arquivo baixado no Linux, com ele e o `SHA256SUMS` na mesma pasta:
@@ -82,7 +82,7 @@ sudo apt install ./recortei-linux-amd64.deb
 sudo dnf install ./recortei-linux-x86_64.rpm      # ou: sudo zypper install ./recortei-linux-x86_64.rpm
 
 # Arch Linux e derivados
-sudo pacman -U ./recortei-0.1.0-1-x86_64.pkg.tar.zst
+sudo pacman -U ./recortei-0.1.1-1-x86_64.pkg.tar.zst
 ```
 
 Depois, abra o **Recortei** pelo menu de aplicativos. Na primeira vez, ele faz sozinho a configuração do seu usuário: inicia junto com a sessão, registra o atalho de captura (**PrintScreen**) no GNOME e dá a permissão de captura do xdg-desktop-portal. Para refazer essa configuração quando quiser:
@@ -95,7 +95,7 @@ recortei --setup
 
 ```bash
 tar xzf recortei-linux-x86_64.tar.gz
-cd recortei-0.1.0-linux-x86_64
+cd recortei-0.1.1-linux-x86_64
 ./install.sh
 ```
 
@@ -117,6 +117,14 @@ sudo apt remove recortei      # ou: sudo dnf remove recortei / sudo zypper remov
 ```
 
 Na instalação pelo tar.gz, o `./install.sh --uninstall` já roda o `recortei --unsetup` e remove os arquivos. Nos dois casos, seus recortes e o `config.json` ficam.
+
+### Atualizações
+
+A partir da 0.1.1, o Recortei se atualiza sozinho, sem passar pelo instalador. Pouco depois de abrir e depois de hora em hora, ele consulta a última release no GitHub. Quando há versão nova, baixa o executável em segundo plano, confere a assinatura com a chave embutida no app e troca o executável no lugar. A versão nova entra na próxima vez que o Recortei abrir; para usar na hora, clique em **Reiniciar para atualizar** no ícone da bandeja.
+
+- **Windows** (instalador ou zip portátil) e **Linux pelo tar.gz** (`~/.local/bin`): atualizam sozinhos.
+- **Pacotes `.deb`, `.rpm` e Arch Linux**: quem atualiza é o gerenciador de pacotes; o Recortei só avisa que há versão nova.
+- Para desligar, defina a variável de ambiente `RECORTEI_NO_UPDATE=1`.
 
 ## Uso
 

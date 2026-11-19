@@ -79,7 +79,7 @@ impl SettingsWindow {
         let window = Rc::new(el.create_window(attrs).map_err(|e| e.to_string())?);
         let surface = Surface::new(context, window.clone()).map_err(|e| e.to_string())?;
         window.request_redraw();
-        Ok(SettingsWindow {
+        let mut w = SettingsWindow {
             window,
             surface,
             frame: None,
@@ -88,7 +88,14 @@ impl SettingsWindow {
             pointer: (-1.0, -1.0),
             cursor: CursorIcon::Default,
             shown: false,
-        })
+        };
+        if cfg!(windows) {
+            // No Windows uma janela invisível não recebe WM_PAINT, então o
+            // RedrawRequested que a tornaria visível nunca chega: desenha já
+            // (como a sobreposição de captura) e o render() a mostra.
+            w.render();
+        }
+        Ok(w)
     }
 
     pub fn id(&self) -> WindowId {

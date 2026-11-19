@@ -8,7 +8,7 @@
 # Ao publicar no AUR, troque o 'SKIP' pelo hash real do tarball (`updpkgsums`).
 
 pkgname=recortei
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
 pkgdesc='Captura de área de tela com anotações, leve e nativa'
 arch=('x86_64')

@@ -1,8 +1,8 @@
 # Pacotes .deb e .rpm do Recortei, gerados com o nFPM (https://nfpm.goreleaser.com).
 # Rode a partir da raiz do repositório, depois do `cargo build --release`:
 #
-#   RECORTEI_VERSION=0.1.0 nfpm package -f packaging/linux/nfpm.yaml -p deb -t recortei-linux-amd64.deb
-#   RECORTEI_VERSION=0.1.0 nfpm package -f packaging/linux/nfpm.yaml -p rpm -t recortei-linux-x86_64.rpm
+#   RECORTEI_VERSION=0.1.1 nfpm package -f packaging/linux/nfpm.yaml -p deb -t recortei-linux-amd64.deb
+#   RECORTEI_VERSION=0.1.1 nfpm package -f packaging/linux/nfpm.yaml -p rpm -t recortei-linux-x86_64.rpm
 #
 # O binário só liga com a libc e a libgcc; as bibliotecas gráficas (xkbcommon,
 # Wayland, X11) são carregadas com dlopen, por isso aparecem aqui como dependências

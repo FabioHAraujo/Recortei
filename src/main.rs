@@ -22,6 +22,7 @@ mod platform;
 mod settings;
 mod setup;
 mod text;
+mod update;
 mod upload;
 
 const HELP: &str = "Recortei — captura de área de tela com anotações
@@ -59,6 +60,16 @@ fn main() {
     if has("--unsetup") {
         std::process::exit(setup::unsetup());
     }
+    // Reiniciado pela atualização automática: espera a instância antiga fechar
+    // antes de disputar a instância única.
+    let after_update = args
+        .iter()
+        .position(|a| a == "--after-update")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|pid| pid.parse::<u32>().ok());
+    if let Some(pid) = after_update {
+        platform::wait_exit(pid, std::time::Duration::from_secs(15));
+    }
     let (cmd, startup) = if has("--quit") {
         ("quit", app::Startup::Idle)
     } else if has("--capture") {
@@ -75,6 +86,12 @@ fn main() {
                 return; // nada rodando para encerrar
             }
             setup::first_run();
+            if after_update.is_some() {
+                output::notify(
+                    "Recortei atualizado",
+                    &format!("Agora na versão {}.", env!("CARGO_PKG_VERSION")),
+                );
+            }
             if let Err(e) = app::run(server, startup) {
                 platform::attach_console();
                 eprintln!("Recortei: {e}");

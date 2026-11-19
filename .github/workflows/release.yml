@@ -99,12 +99,17 @@ jobs:
           Copy-Item LICENSE (Join-Path $stage "LICENSE.txt")
           Compress-Archive -Path "$stage\*" -DestinationPath dist\recortei-windows-x86_64.zip -Force
 
+      # Executável avulso para a atualização automática (assinado no job release).
+      - name: Executável da atualização automática
+        run: Copy-Item target\release\recortei.exe "dist\recortei-$env:VERSION-windows-x86_64.exe"
+
       - uses: actions/upload-artifact@v7
         with:
           name: dist-windows
           path: |
             dist/Recortei-Setup-x86_64.exe
             dist/recortei-windows-x86_64.zip
+            dist/recortei-${{ env.VERSION }}-windows-x86_64.exe
           if-no-files-found: error
           retention-days: 7
 
@@ -159,6 +164,7 @@ jobs:
             if (-not (Test-Path (Join-Path $zip $f))) { throw "faltou $f no zip" }
           }
           Test-Version (Join-Path $zip "recortei.exe")
+          Test-Version (Resolve-Path "dist\recortei-$env:VERSION-windows-x86_64.exe")
 
       - name: Desinstalação silenciosa
         run: |
@@ -216,6 +222,10 @@ jobs:
           RECORTEI_VERSION="$VERSION" nfpm package -f packaging/linux/nfpm.yaml -p deb -t dist/recortei-linux-amd64.deb
           RECORTEI_VERSION="$VERSION" nfpm package -f packaging/linux/nfpm.yaml -p rpm -t dist/recortei-linux-x86_64.rpm
 
+      # Executável avulso para a atualização automática (assinado no job release).
+      - name: Executável da atualização automática
+        run: cp target/release/recortei "dist/recortei-${VERSION}-linux-x86_64"
+
       - uses: actions/upload-artifact@v7
         with:
           name: dist-linux
@@ -223,6 +233,7 @@ jobs:
             dist/recortei-linux-x86_64.tar.gz
             dist/recortei-linux-amd64.deb
             dist/recortei-linux-x86_64.rpm
+            dist/recortei-${{ env.VERSION }}-linux-x86_64
           if-no-files-found: error
           retention-days: 7
 
@@ -352,13 +363,55 @@ jobs:
         with:
           ref: refs/tags/${{ env.TAG }}
           persist-credentials: false
-          sparse-checkout: .github/release-notes
+          sparse-checkout: |
+            .github/release-notes
+            packaging/updater.pub
 
       - uses: actions/download-artifact@v8
         with:
           pattern: dist-*
           path: dist
           merge-multiple: true
+
+      # Atualização automática (src/update.rs): assina os executáveis avulsos
+      # com a chave do updater (formato do `tauri signer`, a mesma convenção do
+      # Zynko e da LowBloat; a privada fica em ~/.tauri/recortei-updater.key) e
+      # gera o latest.json que o app consulta em releases/latest/download.
+      - name: Assina a atualização automática e gera o latest.json
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::Falta o secret TAURI_SIGNING_PRIVATE_KEY (chave do updater)."
+            exit 1
+          fi
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq minisign
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
+          pub=$(base64 -d packaging/updater.pub | sed -n 2p)
+          sigdir="$RUNNER_TEMP/sig"
+          mkdir -p "$sigdir"
+          platforms='{}'
+          for plat in windows-x86_64 linux-x86_64; do
+            ext=""
+            [ "$plat" = windows-x86_64 ] && ext=".exe"
+            f="recortei-${VERSION}-${plat}${ext}"
+            # assina uma cópia: o .sig não vai para a release
+            cp "dist/$f" "$sigdir/$f"
+            npx --yes @tauri-apps/cli@2.12.6 signer sign "$sigdir/$f"
+            sig=$(tr -d '\r\n' < "$sigdir/$f.sig")
+            # confere com a chave pública embutida no app (pega secret trocado)
+            echo "$sig" | base64 -d > "$sigdir/$f.minisig"
+            minisign -V -m "$sigdir/$f" -x "$sigdir/$f.minisig" -P "$pub"
+            platforms=$(jq --arg p "$plat" --arg url "$base/$f" --arg sig "$sig" \
+              '. + {($p): {signature: $sig, url: $url}}' <<<"$platforms")
+          done
+          jq -n --arg v "$VERSION" --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --rawfile notes ".github/release-notes/${TAG}.md" --argjson platforms "$platforms" \
+            '{version: $v, notes: $notes, pub_date: $date, platforms: $platforms}' > dist/latest.json
+          jq '.notes |= .[:80]' dist/latest.json
 
       - name: Confere os arquivos e gera o SHA256SUMS
         run: |
@@ -371,6 +424,9 @@ jobs:
             recortei-linux-amd64.deb
             recortei-linux-x86_64.rpm
             "recortei-${VERSION}-1-x86_64.pkg.tar.zst"
+            "recortei-${VERSION}-windows-x86_64.exe"
+            "recortei-${VERSION}-linux-x86_64"
+            latest.json
           )
           for f in "${expected[@]}"; do
             [ -s "$f" ] || { echo "::error::Faltou o arquivo $f"; exit 1; }
